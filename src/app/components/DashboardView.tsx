@@ -4,11 +4,10 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import {
-  ChevronDown, Filter, Search, ArrowUpDown, Copy, ExternalLink,
+  ChevronDown, Search, ArrowUpDown, Copy, ExternalLink,
   Download, Check, Calendar,
 } from "lucide-react";
 import { TOOLS, TOOL_MAP, CATEGORIES, type Tool, type Category } from "../config";
-import { FilterDialog } from "./FilterDialog";
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
@@ -145,8 +144,6 @@ export function DashboardView() {
   const [endTime, setEndTime]       = useState("");
   const [uiRefreshTime, setUiRefreshTime] = useState("1");
   const [keyword, setKeyword]       = useState("");
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [refreshMode, setRefreshMode] = useState<"periodic"|"live">("periodic");
 
   // Collapsible sections
   const [sections, setSections] = useState({ issueDetails: true, kpis: true, graph: true });
@@ -274,8 +271,6 @@ export function DashboardView() {
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-background" style={{ scrollbarWidth: "none" }}>
-      <FilterDialog open={filterOpen} onClose={() => setFilterOpen(false)} apiEnabled={refreshMode === "live"} />
-
       {/* ── Title row ── */}
       <div className="flex items-start justify-between px-5 pt-4 pb-2 border-b border-border/40">
         <div className="flex items-center gap-2">
@@ -293,31 +288,10 @@ export function DashboardView() {
             <input
               type="number" min="1" max="60" value={uiRefreshTime}
               onChange={e => setUiRefreshTime(e.target.value)}
-              disabled={refreshMode === "live"}
-              className="w-10 bg-transparent text-foreground outline-none text-center disabled:opacity-40"
+              className="w-10 bg-transparent text-foreground outline-none text-center"
               style={{ ...mono, fontSize: 11 }}
             />
             <span className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>min</span>
-          </div>
-          {/* Live / Periodic toggle */}
-          <div
-            className="flex items-center p-0.5 bg-secondary border border-border rounded-sm"
-            title="Periodic: refresh every N min. Live: webhook-driven refresh on threshold breach + 15m timer."
-          >
-            {(["periodic","live"] as const).map(m => {
-              const active = refreshMode === m;
-              return (
-                <button
-                  key={m}
-                  onClick={() => setRefreshMode(m)}
-                  className={`px-2.5 py-1 rounded-sm transition-colors ${active ? (m==="live" ? "bg-[#e5534b]/15 text-[#e5534b]" : "bg-card text-foreground") : "text-muted-foreground hover:text-foreground"}`}
-                  style={{ ...sans, fontSize: 11, fontWeight: active ? 600 : 400 }}
-                >
-                  {m === "live" && active && <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#e5534b] mr-1 animate-pulse align-middle" />}
-                  {m === "live" ? "Live" : "Periodic"}
-                </button>
-              );
-            })}
           </div>
           {/* Keyword search */}
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-secondary border border-border rounded-sm">
@@ -389,11 +363,6 @@ export function DashboardView() {
             style={{ ...mono, fontSize: 11 }}>
             {TIME_RANGE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
-          <button onClick={() => setFilterOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
-            style={{ ...sans, fontSize: 12 }}>
-            <Filter className="w-3.5 h-3.5" />
-          </button>
         </div>
       </div>
 
@@ -473,7 +442,7 @@ export function DashboardView() {
 
         {/* ── Evaluation Matrix ── */}
         <div>
-          <p className="text-foreground mb-3" style={{ ...sans, fontSize: 14, fontWeight: 600 }}>Evaluation Matrix</p>
+          <p className="mb-3" style={{ ...sans, fontSize: 14, fontWeight: 600, color: "white" }}>Evaluation Matrix</p>
           <div className="rounded-sm border border-border overflow-hidden" style={{ background: "white" }}>
             <table className="w-full text-sm border-collapse">
               <thead>
