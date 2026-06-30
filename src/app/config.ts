@@ -1,5 +1,5 @@
 export type Tool = "all" | "dynatrace" | "opmanager" | "appdynamics" | "heal";
-export type View = "dashboard" | "chat" | "settings";
+export type View = "dashboard" | "chat" | "settings" | "ai-monitoring";
 
 export interface ToolConfig {
   id: Tool;
