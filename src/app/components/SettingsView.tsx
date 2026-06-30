@@ -824,6 +824,83 @@ export function SettingsView() {
               </Card>
             </div>
           )}
+
+          {/* ── ISSUE CATEGORIZATION ── */}
+          {active === "issueCategorization" && (
+            <div className="grid gap-5 max-w-5xl">
+              <SectionTitle hint="Define keyword-based issue categories. A keyword must belong to only one category.">Issue Categorization</SectionTitle>
+
+              <Card title="Create Category" description="Add a new category. You can add keywords to it below.">
+                <div className="flex items-center gap-2">
+                  <input value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Category name (e.g. Database)"
+                    onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addNewCategory())}
+                    className={inputCls + " max-w-sm"} style={{ ...sans, fontSize: 12 }} />
+                  <button onClick={addNewCategory} className="flex items-center gap-1 px-3 py-1.5 rounded-sm border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors" style={{ ...sans, fontSize: 12 }}>
+                    <Plus className="w-3.5 h-3.5" /> Create
+                  </button>
+                </div>
+              </Card>
+
+              <div className="grid gap-3">
+                {issueCats.map(c => {
+                  const inputVal = icKeywordInputs[c.id] ?? "";
+                  const warning = icWarnings[c.id];
+                  const isEditing = editingId === c.id;
+                  return (
+                    <div key={c.id} className="bg-card border border-border rounded-sm">
+                      <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 gap-2">
+                        {isEditing ? (
+                          <input autoFocus value={editingName} onChange={e => setEditingName(e.target.value)}
+                            onBlur={() => commitRename(c.id)} onKeyDown={e => e.key === "Enter" && commitRename(c.id)}
+                            className={inputCls + " max-w-sm"} style={{ ...sans, fontSize: 13, fontWeight: 600 }} />
+                        ) : (
+                          <h3 className="text-foreground" style={{ ...sans, fontSize: 13, fontWeight: 600 }}>{c.name}</h3>
+                        )}
+                        <div className="flex items-center gap-1">
+                          <span className="text-muted-foreground mr-2" style={{ ...mono, fontSize: 10 }}>{c.keywords.length} keywords</span>
+                          <button onClick={() => { setEditingId(c.id); setEditingName(c.name); }}
+                            title="Rename"
+                            className="p-1.5 rounded-sm border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors">
+                            <Edit3 className="w-3 h-3" />
+                          </button>
+                          <button onClick={() => deleteCategory(c.id)}
+                            title="Delete category"
+                            className="p-1.5 rounded-sm border border-[#e5534b]/40 bg-[#e5534b]/10 text-[#e5534b] hover:bg-[#e5534b]/20 transition-colors">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="p-4 grid gap-3">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {c.keywords.length === 0 && (
+                            <span className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>No keywords yet.</span>
+                          )}
+                          {c.keywords.map(k => (
+                            <Chip key={k} onRemove={() => removeCategoryKeyword(c.id, k)}>{k}</Chip>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input value={inputVal}
+                            onChange={e => setIcKeywordInputs(i => ({ ...i, [c.id]: e.target.value }))}
+                            onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addCategoryKeyword(c.id))}
+                            placeholder="Add keyword…"
+                            className={inputCls + " max-w-xs"} style={{ ...mono, fontSize: 12 }} />
+                          <button onClick={() => addCategoryKeyword(c.id)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-sm border border-border bg-secondary text-foreground hover:border-primary/40 hover:text-primary transition-colors"
+                            style={{ ...sans, fontSize: 11 }}>
+                            <Plus className="w-3.5 h-3.5" /> Add
+                          </button>
+                        </div>
+                        {warning && (
+                          <Banner tone="warn" icon={<AlertCircle className="w-4 h-4" />}>{warning}</Banner>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Sticky footer ── */}
