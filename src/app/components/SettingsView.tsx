@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import {
-  Search, Save, RotateCcw, X, Upload, Download, AlertCircle, CheckCircle2,
+  Search, Save, RotateCcw, X, AlertCircle, CheckCircle2,
   Settings as SettingsIcon, Activity, LayoutDashboard, Brain, Database,
   SlidersHorizontal, Cpu, Wrench, ChevronDown, ChevronRight, Plug,
   FileText, FolderOpen, Edit3, ExternalLink, Plus, Info, Tag, Trash2,
