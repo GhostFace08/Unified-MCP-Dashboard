@@ -1,9 +1,9 @@
 import { useState, useMemo } from "react";
 import {
-  Search, Save, RotateCcw, X, Upload, Download, AlertCircle, CheckCircle2,
+  Search, Save, RotateCcw, X, AlertCircle, CheckCircle2,
   Settings as SettingsIcon, Activity, LayoutDashboard, Brain, Database,
   SlidersHorizontal, Cpu, Wrench, ChevronDown, ChevronRight, Plug,
-  FileText, FolderOpen, Edit3, ExternalLink, Plus, Info,
+  FileText, FolderOpen, Edit3, ExternalLink, Plus, Info, Tag, Trash2,
 } from "lucide-react";
 import { TOOLS, TOOL_MAP, type Tool } from "../config";
 
@@ -236,12 +236,13 @@ function ServiceForm({ cfg, onChange }: { cfg: ServiceConfig; onChange: (c: Serv
 
 // ─── Settings categories ──────────────────────────────────────────────────────
 type CategoryId =
-  | "general" | "monitoring" | "dashboard" | "ai" | "rag" | "search" | "performance" | "advanced";
+  | "general" | "monitoring" | "dashboard" | "issueCategorization" | "ai" | "rag" | "search" | "performance" | "advanced";
 
 const NAV: { id: CategoryId; label: string; icon: any; description: string }[] = [
   { id: "general",     label: "General",            icon: SettingsIcon,     description: "Application & logging" },
   { id: "monitoring",  label: "Monitoring Services",icon: Activity,         description: "Dynatrace, OpManager, HEAL, AppDynamics" },
   { id: "dashboard",   label: "Dashboard",          icon: LayoutDashboard,  description: "Defaults, alerts, display" },
+  { id: "issueCategorization", label: "Issue Categorization", icon: Tag,    description: "Keyword-based categories" },
   { id: "ai",          label: "AI & Models",        icon: Brain,            description: "Local LLM & intent detection" },
   { id: "rag",         label: "Retrieval (RAG)",    icon: Database,         description: "Vector store & documents" },
   { id: "search",      label: "Search & Ranking",   icon: SlidersHorizontal,description: "Embeddings, hybrid, re-ranker" },
@@ -339,6 +340,64 @@ export function SettingsView() {
   const [mainPrompt, setMainPrompt] = useState("prompts/main.txt");
   const [vizPrompt, setVizPrompt] = useState("prompts/visualization.txt");
 
+  // ── ISSUE CATEGORIZATION ──────────────
+  interface IssueCategory { id: string; name: string; keywords: string[] }
+  const [issueCats, setIssueCats] = useState<IssueCategory[]>([
+    { id: "ic-1", name: "Availability",      keywords: ["down", "outage", "unreachable"] },
+    { id: "ic-2", name: "Performance",       keywords: ["slow", "latency", "timeout"] },
+    { id: "ic-3", name: "Infrastructure",    keywords: ["cpu", "memory", "disk", "pod"] },
+    { id: "ic-4", name: "Application Error", keywords: ["exception", "error", "5xx"] },
+    { id: "ic-5", name: "Security",          keywords: ["unauthorized", "jwt", "intrusion"] },
+  ]);
+  const [icKeywordInputs, setIcKeywordInputs] = useState<Record<string, string>>({});
+  const [icWarnings, setIcWarnings] = useState<Record<string, string>>({});
+  const [newCatName, setNewCatName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+
+  function findKeywordOwner(kw: string, exceptId?: string) {
+    return issueCats.find(c => c.id !== exceptId && c.keywords.some(k => k.toLowerCase() === kw.toLowerCase()));
+  }
+
+  function addCategoryKeyword(catId: string) {
+    const raw = (icKeywordInputs[catId] || "").trim();
+    if (!raw) return;
+    const owner = findKeywordOwner(raw, catId);
+    if (owner) {
+      setIcWarnings(w => ({ ...w, [catId]: `"${raw}" already belongs to "${owner.name}". Duplicate keywords cause ambiguous categorization.` }));
+      return;
+    }
+    setIssueCats(cs => cs.map(c => c.id === catId ? { ...c, keywords: [...c.keywords, raw] } : c));
+    setIcKeywordInputs(i => ({ ...i, [catId]: "" }));
+    setIcWarnings(w => ({ ...w, [catId]: "" }));
+    markDirty();
+  }
+
+  function removeCategoryKeyword(catId: string, kw: string) {
+    setIssueCats(cs => cs.map(c => c.id === catId ? { ...c, keywords: c.keywords.filter(k => k !== kw) } : c));
+    markDirty();
+  }
+
+  function addNewCategory() {
+    const n = newCatName.trim();
+    if (!n) return;
+    setIssueCats(cs => [...cs, { id: `ic-${Date.now()}`, name: n, keywords: [] }]);
+    setNewCatName("");
+    markDirty();
+  }
+
+  function deleteCategory(catId: string) {
+    setIssueCats(cs => cs.filter(c => c.id !== catId));
+    markDirty();
+  }
+
+  function commitRename(catId: string) {
+    const n = editingName.trim();
+    if (n) setIssueCats(cs => cs.map(c => c.id === catId ? { ...c, name: n } : c));
+    setEditingId(null); setEditingName("");
+    markDirty();
+  }
+
   const navFiltered = NAV.filter(n => !navSearch || n.label.toLowerCase().includes(navSearch.toLowerCase()) || n.description.toLowerCase().includes(navSearch.toLowerCase()));
 
   function addKeyword() {
@@ -374,13 +433,6 @@ export function SettingsView() {
             );
           })}
         </nav>
-        <div className="border-t border-border/60 px-3 py-3 grid gap-1.5">
-          <p className="text-muted-foreground" style={{ ...mono, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em" }}>Recently Modified</p>
-          <p className="text-foreground/80" style={{ ...sans, fontSize: 11 }}>Dynatrace · Collection Mode</p>
-          <p className="text-muted-foreground" style={{ ...mono, fontSize: 10 }}>3h ago</p>
-          <p className="text-foreground/80 mt-1" style={{ ...sans, fontSize: 11 }}>Dashboard · Refresh Interval</p>
-          <p className="text-muted-foreground" style={{ ...mono, fontSize: 10 }}>yesterday</p>
-        </div>
       </aside>
 
       {/* ── Main column ── */}
@@ -394,12 +446,6 @@ export function SettingsView() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-border bg-card hover:border-primary/40 hover:text-primary transition-colors text-foreground" style={{ ...sans, fontSize: 12 }}>
-              <Upload className="w-3.5 h-3.5" /> Import
-            </button>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-border bg-card hover:border-primary/40 hover:text-primary transition-colors text-foreground" style={{ ...sans, fontSize: 12 }}>
-              <Download className="w-3.5 h-3.5" /> Export
-            </button>
           </div>
         </div>
 
@@ -776,6 +822,83 @@ export function SettingsView() {
                   <p className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>This cannot be undone.</p>
                 </div>
               </Card>
+            </div>
+          )}
+
+          {/* ── ISSUE CATEGORIZATION ── */}
+          {active === "issueCategorization" && (
+            <div className="grid gap-5 max-w-5xl">
+              <SectionTitle hint="Define keyword-based issue categories. A keyword must belong to only one category.">Issue Categorization</SectionTitle>
+
+              <Card title="Create Category" description="Add a new category. You can add keywords to it below.">
+                <div className="flex items-center gap-2">
+                  <input value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Category name (e.g. Database)"
+                    onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addNewCategory())}
+                    className={inputCls + " max-w-sm"} style={{ ...sans, fontSize: 12 }} />
+                  <button onClick={addNewCategory} className="flex items-center gap-1 px-3 py-1.5 rounded-sm border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors" style={{ ...sans, fontSize: 12 }}>
+                    <Plus className="w-3.5 h-3.5" /> Create
+                  </button>
+                </div>
+              </Card>
+
+              <div className="grid gap-3">
+                {issueCats.map(c => {
+                  const inputVal = icKeywordInputs[c.id] ?? "";
+                  const warning = icWarnings[c.id];
+                  const isEditing = editingId === c.id;
+                  return (
+                    <div key={c.id} className="bg-card border border-border rounded-sm">
+                      <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 gap-2">
+                        {isEditing ? (
+                          <input autoFocus value={editingName} onChange={e => setEditingName(e.target.value)}
+                            onBlur={() => commitRename(c.id)} onKeyDown={e => e.key === "Enter" && commitRename(c.id)}
+                            className={inputCls + " max-w-sm"} style={{ ...sans, fontSize: 13, fontWeight: 600 }} />
+                        ) : (
+                          <h3 className="text-foreground" style={{ ...sans, fontSize: 13, fontWeight: 600 }}>{c.name}</h3>
+                        )}
+                        <div className="flex items-center gap-1">
+                          <span className="text-muted-foreground mr-2" style={{ ...mono, fontSize: 10 }}>{c.keywords.length} keywords</span>
+                          <button onClick={() => { setEditingId(c.id); setEditingName(c.name); }}
+                            title="Rename"
+                            className="p-1.5 rounded-sm border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors">
+                            <Edit3 className="w-3 h-3" />
+                          </button>
+                          <button onClick={() => deleteCategory(c.id)}
+                            title="Delete category"
+                            className="p-1.5 rounded-sm border border-[#e5534b]/40 bg-[#e5534b]/10 text-[#e5534b] hover:bg-[#e5534b]/20 transition-colors">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="p-4 grid gap-3">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {c.keywords.length === 0 && (
+                            <span className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>No keywords yet.</span>
+                          )}
+                          {c.keywords.map(k => (
+                            <Chip key={k} onRemove={() => removeCategoryKeyword(c.id, k)}>{k}</Chip>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input value={inputVal}
+                            onChange={e => setIcKeywordInputs(i => ({ ...i, [c.id]: e.target.value }))}
+                            onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addCategoryKeyword(c.id))}
+                            placeholder="Add keyword…"
+                            className={inputCls + " max-w-xs"} style={{ ...mono, fontSize: 12 }} />
+                          <button onClick={() => addCategoryKeyword(c.id)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-sm border border-border bg-secondary text-foreground hover:border-primary/40 hover:text-primary transition-colors"
+                            style={{ ...sans, fontSize: 11 }}>
+                            <Plus className="w-3.5 h-3.5" /> Add
+                          </button>
+                        </div>
+                        {warning && (
+                          <Banner tone="warn" icon={<AlertCircle className="w-4 h-4" />}>{warning}</Banner>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

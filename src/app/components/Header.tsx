@@ -1,5 +1,6 @@
-import { Check } from "lucide-react";
+import { Check, Moon, Sun } from "lucide-react";
 import type { View } from "../config";
+import { useTheme } from "../theme";
 
 interface HeaderProps {
   activeView: View;
@@ -10,8 +11,10 @@ export function Header({ activeView, onViewChange }: HeaderProps) {
   const tabs: { id: View; label: string }[] = [
     { id: "dashboard", label: "Dashboard" },
     { id: "chat",      label: "AI Chat" },
+    { id: "ai-monitoring", label: "AI Monitoring" },
     { id: "settings",  label: "Settings" },
   ];
+  const { theme, toggle } = useTheme();
 
   return (
     <header className="shrink-0 flex items-center border-b border-border bg-sidebar px-4 h-12 gap-2">
@@ -34,6 +37,10 @@ export function Header({ activeView, onViewChange }: HeaderProps) {
         );
       })}
       <div className="flex-1" />
+      <button onClick={toggle} title="Toggle theme"
+        className="w-8 h-8 flex items-center justify-center rounded-sm border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+        {theme === "dark" ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+      </button>
       <button className="px-3 py-1.5 rounded-sm border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" style={{ fontFamily: "'Inter', sans-serif", fontSize: 12 }}>
         Sign In
       </button>

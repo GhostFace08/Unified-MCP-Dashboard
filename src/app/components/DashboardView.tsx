@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import {
   ChevronDown, Search, ArrowUpDown, Copy, ExternalLink,
-  Download, Check, Calendar,
+  Download, Check, Calendar, RefreshCw, X as XIcon,
 } from "lucide-react";
 import { TOOLS, TOOL_MAP, CATEGORIES, type Tool, type Category } from "../config";
 
@@ -27,54 +27,41 @@ const GRAPH_DATA = {
   heal:        [{ time:"Mon",total:17 },{ time:"Tue",total:20 },{ time:"Wed",total:14 },{ time:"Thu",total:5  },{ time:"Fri",total:12 },{ time:"Sat",total:14 },{ time:"Sun",total:14 }],
 };
 
-// Matrix: columns = { tool, app }, rows = categories
-const MATRIX_COLS = [
-  { tool: "dynatrace"   as Tool, toolName: "DynaTrace",   app: "easyTravel" },
-  { tool: "dynatrace"   as Tool, toolName: "DynaTrace",   app: "petClinic" },
-  { tool: "opmanager"   as Tool, toolName: "OPManager",   app: "network-core" },
-  { tool: "opmanager"   as Tool, toolName: "OPManager",   app: "dmz-zone" },
-  { tool: "appdynamics" as Tool, toolName: "AppDynamics", app: "checkout" },
-  { tool: "appdynamics" as Tool, toolName: "AppDynamics", app: "authSvc" },
-  { tool: "appdynamics" as Tool, toolName: "AppDynamics", app: "easyTL-linux" },
-  { tool: "heal"        as Tool, toolName: "HEAL",        app: "onlineBank" },
-];
-
-// [category][col] = {current, total}
-const MATRIX_DATA: Record<Category, { current: number; total: number }[]> = {
-  "Availability":     [{c:0,t:2},{c:0,t:0},{c:1,t:3},{c:0,t:1},{c:2,t:5},{c:0,t:2},{c:0,t:1},{c:0,t:1}].map(x=>({current:x.c,total:x.t})),
-  "Performance":      [{c:1,t:4},{c:0,t:0},{c:0,t:1},{c:0,t:0},{c:0,t:3},{c:1,t:2},{c:0,t:0},{c:0,t:0}].map(x=>({current:x.c,total:x.t})),
-  "Infrastructure":   [{c:0,t:1},{c:0,t:1},{c:2,t:4},{c:0,t:2},{c:0,t:1},{c:0,t:0},{c:0,t:0},{c:0,t:0}].map(x=>({current:x.c,total:x.t})),
-  "Application Error":[{c:0,t:3},{c:1,t:2},{c:0,t:0},{c:0,t:0},{c:3,t:6},{c:2,t:4},{c:1,t:3},{c:0,t:2}].map(x=>({current:x.c,total:x.t})),
-  "Security":         [{c:0,t:0},{c:0,t:1},{c:0,t:0},{c:0,t:0},{c:1,t:2},{c:0,t:0},{c:0,t:1},{c:0,t:0}].map(x=>({current:x.c,total:x.t})),
-};
-
 interface IssueRow {
   id: string; srNo: number; source: Tool; issueId: string; application: string;
   title: string; affectedEntities: string; severity: "Critical"|"High"|"Medium"|"Low";
   category: Category; description: string; status: "Active"|"Resolved";
   startTime: string; endTime: string; duration: string;
+  // Numeric sort key for "most recent" — minutes-of-day; bigger = more recent
+  ts: number;
 }
 
-const ALL_ISSUES: IssueRow[] = [
-  { id:"1",  srNo:1,  source:"dynatrace",   issueId:"DT-4421", application:"easyTravel",  title:"JDBC Pool Exhausted",          affectedEntities:"payment-svc, checkout",     severity:"Critical", category:"Availability",     description:"100/100 connections active — checkout queries timing out",              status:"Active",   startTime:"14:50", endTime:"—",     duration:"3m 12s" },
-  { id:"2",  srNo:2,  source:"dynatrace",   issueId:"DT-4420", application:"petClinic",   title:"Heap OOM Warning",             affectedEntities:"jvm-heap-01",               severity:"Critical", category:"Infrastructure",   description:"GC pauses >2s, heap at 94%, P99 degraded",                              status:"Active",   startTime:"14:47", endTime:"—",     duration:"6m 44s" },
-  { id:"3",  srNo:3,  source:"dynatrace",   issueId:"DT-4419", application:"easyTravel",  title:"OOMKilled Pod",                affectedEntities:"payment-service-7d9f8",      severity:"High",     category:"Infrastructure",   description:"K8s pod OOMKilled: exceeded 2Gi memory limit",                          status:"Resolved", startTime:"14:38", endTime:"14:46", duration:"8m 00s" },
-  { id:"4",  srNo:4,  source:"dynatrace",   issueId:"DT-4418", application:"petClinic",   title:"Thread Pool Saturation",       affectedEntities:".net-clr-proc",             severity:"High",     category:"Performance",      description:"92% threads busy for >30s, queue growing",                              status:"Active",   startTime:"14:43", endTime:"—",     duration:"9m 01s" },
-  { id:"5",  srNo:5,  source:"opmanager",   issueId:"OM-2201", application:"network-core",title:"Firewall CPU Critical",        affectedEntities:"fw-core-01",                severity:"Critical", category:"Infrastructure",   description:"CPU utilization 89%, stateful inspection throughput degraded",           status:"Active",   startTime:"14:51", endTime:"—",     duration:"4m 55s" },
-  { id:"6",  srNo:6,  source:"opmanager",   issueId:"OM-2200", application:"network-core",title:"Port Gi0/24 Flapping",         affectedEntities:"core-switch-01, Gi0/24",    severity:"High",     category:"Availability",     description:"12 up/down transitions in 60s — spanning-tree instability",              status:"Active",   startTime:"14:46", endTime:"—",     duration:"7m 02s" },
-  { id:"7",  srNo:7,  source:"opmanager",   issueId:"OM-2199", application:"dmz-zone",    title:"LB Backend Health Failure",    affectedEntities:"lb-prod-02",                severity:"High",     category:"Availability",     description:"2/6 backend nodes failing health checks",                               status:"Active",   startTime:"14:40", endTime:"—",     duration:"2m 18s" },
-  { id:"8",  srNo:8,  source:"opmanager",   issueId:"OM-2198", application:"dmz-zone",    title:"DNS NXDOMAIN Spike",           affectedEntities:"dns-primary",               severity:"Medium",   category:"Application Error","description":"142 NXDOMAIN in 5min — possible misconfigured zone",                   status:"Resolved", startTime:"14:35", endTime:"14:48", duration:"13m 00s"},
-  { id:"9",  srNo:9,  source:"appdynamics", issueId:"AD-9901", application:"checkout",    title:"BT Health Critical",           affectedEntities:"checkout-flow, payment-gw", severity:"Critical", category:"Availability",     description:"Error rate 18%, avg response 12s — checkout BT health critical",         status:"Active",   startTime:"14:53", endTime:"—",     duration:"2m 41s" },
-  { id:"10", srNo:10, source:"appdynamics", issueId:"AD-9900", application:"checkout",    title:"Thread Pool Blocked",          affectedEntities:"tomcat-exec-pool",          severity:"Critical", category:"Performance",      description:"All 200 Tomcat threads blocked on DB calls",                            status:"Active",   startTime:"14:50", endTime:"—",     duration:"5m 10s" },
-  { id:"11", srNo:11, source:"appdynamics", issueId:"AD-9899", application:"authSvc",     title:"JWT Validation Spike",         affectedEntities:"auth-service-02",           severity:"High",     category:"Security",         description:"234 JWT failures/min from IP 45.33.x.x",                                status:"Active",   startTime:"14:47", endTime:"—",     duration:"6m 06s" },
-  { id:"12", srNo:12, source:"appdynamics", issueId:"AD-9898", application:"easyTL-linux",title:"Elasticsearch Latency",        affectedEntities:"es-cluster-prod",           severity:"Medium",   category:"Performance",      description:"Product search P95 = 3.2s (threshold 1s)",                              status:"Active",   startTime:"14:42", endTime:"—",     duration:"8m 44s" },
-  { id:"13", srNo:13, source:"appdynamics", issueId:"AD-9897", application:"checkout",    title:"Stripe API Latency",           affectedEntities:"payment-gateway",           severity:"High",     category:"Application Error","description":"Stripe API P99 9.8s — conversion rate down 22%",                       status:"Active",   startTime:"14:37", endTime:"—",     duration:"3m 18s" },
-  { id:"14", srNo:14, source:"heal",        issueId:"HL-0441", application:"onlineBank",  title:"Remediation Timeout",          affectedEntities:"payment-service-pod",       severity:"High",     category:"Application Error","description":"restart_pod action timed out after 120s — manual required",              status:"Active",   startTime:"14:54", endTime:"—",     duration:"2m 00s" },
-  { id:"15", srNo:15, source:"heal",        issueId:"HL-0440", application:"onlineBank",  title:"Root Cause Confirmed",         affectedEntities:"db-pool, checkout",         severity:"Medium",   category:"Availability",     description:"DB pool exhaustion → checkout timeouts (94% confidence)",               status:"Resolved", startTime:"14:48", endTime:"14:52", duration:"4m 00s" },
-  { id:"16", srNo:16, source:"heal",        issueId:"HL-0439", application:"onlineBank",  title:"Disk Predictive Alert",        affectedEntities:"db-primary-vol",            severity:"Low",      category:"Infrastructure",   description:"Disk will reach 95% in ~4h at current write rate",                      status:"Active",   startTime:"14:33", endTime:"—",     duration:"—"      },
-];
+function tsOf(t: string): number {
+  if (!t || t === "—") return -1;
+  const [h, m] = t.split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
 
-// KPI data
+const RAW_ISSUES = [
+  { id:"1",  srNo:1,  source:"dynatrace"   as Tool, issueId:"DT-4421", application:"easyTravel",  title:"JDBC Pool Exhausted",          affectedEntities:"payment-svc, checkout",     severity:"Critical" as const, category:"Availability"      as Category, description:"100/100 connections active — checkout queries timing out",              status:"Active"   as const, startTime:"14:50", endTime:"—",     duration:"3m 12s" },
+  { id:"2",  srNo:2,  source:"dynatrace"   as Tool, issueId:"DT-4420", application:"petClinic",   title:"Heap OOM Warning",             affectedEntities:"jvm-heap-01",               severity:"Critical" as const, category:"Infrastructure"    as Category, description:"GC pauses >2s, heap at 94%, P99 degraded",                              status:"Active"   as const, startTime:"14:47", endTime:"—",     duration:"6m 44s" },
+  { id:"3",  srNo:3,  source:"dynatrace"   as Tool, issueId:"DT-4419", application:"easyTravel",  title:"OOMKilled Pod",                affectedEntities:"payment-service-7d9f8",     severity:"High"     as const, category:"Infrastructure"    as Category, description:"K8s pod OOMKilled: exceeded 2Gi memory limit",                          status:"Resolved" as const, startTime:"14:38", endTime:"14:46", duration:"8m 00s" },
+  { id:"4",  srNo:4,  source:"dynatrace"   as Tool, issueId:"DT-4418", application:"petClinic",   title:"Thread Pool Saturation",       affectedEntities:".net-clr-proc",             severity:"High"     as const, category:"Performance"       as Category, description:"92% threads busy for >30s, queue growing",                              status:"Active"   as const, startTime:"14:43", endTime:"—",     duration:"9m 01s" },
+  { id:"5",  srNo:5,  source:"opmanager"   as Tool, issueId:"OM-2201", application:"network-core",title:"Firewall CPU Critical",        affectedEntities:"fw-core-01",                severity:"Critical" as const, category:"Infrastructure"    as Category, description:"CPU utilization 89%, stateful inspection throughput degraded",          status:"Active"   as const, startTime:"14:51", endTime:"—",     duration:"4m 55s" },
+  { id:"6",  srNo:6,  source:"opmanager"   as Tool, issueId:"OM-2200", application:"network-core",title:"Port Gi0/24 Flapping",         affectedEntities:"core-switch-01, Gi0/24",    severity:"High"     as const, category:"Availability"      as Category, description:"12 up/down transitions in 60s — spanning-tree instability",             status:"Active"   as const, startTime:"14:46", endTime:"—",     duration:"7m 02s" },
+  { id:"7",  srNo:7,  source:"opmanager"   as Tool, issueId:"OM-2199", application:"dmz-zone",    title:"LB Backend Health Failure",    affectedEntities:"lb-prod-02",                severity:"High"     as const, category:"Availability"      as Category, description:"2/6 backend nodes failing health checks",                               status:"Active"   as const, startTime:"14:40", endTime:"—",     duration:"2m 18s" },
+  { id:"8",  srNo:8,  source:"opmanager"   as Tool, issueId:"OM-2198", application:"dmz-zone",    title:"DNS NXDOMAIN Spike",           affectedEntities:"dns-primary",               severity:"Medium"   as const, category:"Application Error" as Category, description:"142 NXDOMAIN in 5min — possible misconfigured zone",                    status:"Resolved" as const, startTime:"14:35", endTime:"14:48", duration:"13m 00s"},
+  { id:"9",  srNo:9,  source:"appdynamics" as Tool, issueId:"AD-9901", application:"checkout",    title:"BT Health Critical",           affectedEntities:"checkout-flow, payment-gw", severity:"Critical" as const, category:"Availability"      as Category, description:"Error rate 18%, avg response 12s — checkout BT health critical",        status:"Active"   as const, startTime:"14:53", endTime:"—",     duration:"2m 41s" },
+  { id:"10", srNo:10, source:"appdynamics" as Tool, issueId:"AD-9900", application:"checkout",    title:"Thread Pool Blocked",          affectedEntities:"tomcat-exec-pool",          severity:"Critical" as const, category:"Performance"       as Category, description:"All 200 Tomcat threads blocked on DB calls",                            status:"Active"   as const, startTime:"14:50", endTime:"—",     duration:"5m 10s" },
+  { id:"11", srNo:11, source:"appdynamics" as Tool, issueId:"AD-9899", application:"authSvc",     title:"JWT Validation Spike",         affectedEntities:"auth-service-02",           severity:"High"     as const, category:"Security"          as Category, description:"234 JWT failures/min from IP 45.33.x.x",                                status:"Active"   as const, startTime:"14:47", endTime:"—",     duration:"6m 06s" },
+  { id:"12", srNo:12, source:"appdynamics" as Tool, issueId:"AD-9898", application:"easyTL-linux",title:"Elasticsearch Latency",        affectedEntities:"es-cluster-prod",           severity:"Medium"   as const, category:"Performance"       as Category, description:"Product search P95 = 3.2s (threshold 1s)",                              status:"Active"   as const, startTime:"14:42", endTime:"—",     duration:"8m 44s" },
+  { id:"13", srNo:13, source:"appdynamics" as Tool, issueId:"AD-9897", application:"checkout",    title:"Stripe API Latency",           affectedEntities:"payment-gateway",           severity:"High"     as const, category:"Application Error" as Category, description:"Stripe API P99 9.8s — conversion rate down 22%",                        status:"Active"   as const, startTime:"14:37", endTime:"—",     duration:"3m 18s" },
+  { id:"14", srNo:14, source:"heal"        as Tool, issueId:"HL-0441", application:"onlineBank",  title:"Remediation Timeout",          affectedEntities:"payment-service-pod",       severity:"High"     as const, category:"Application Error" as Category, description:"restart_pod action timed out after 120s — manual required",             status:"Active"   as const, startTime:"14:54", endTime:"—",     duration:"2m 00s" },
+  { id:"15", srNo:15, source:"heal"        as Tool, issueId:"HL-0440", application:"onlineBank",  title:"Root Cause Confirmed",         affectedEntities:"db-pool, checkout",         severity:"Medium"   as const, category:"Availability"      as Category, description:"DB pool exhaustion → checkout timeouts (94% confidence)",               status:"Resolved" as const, startTime:"14:48", endTime:"14:52", duration:"4m 00s" },
+  { id:"16", srNo:16, source:"heal"        as Tool, issueId:"HL-0439", application:"onlineBank",  title:"Disk Predictive Alert",        affectedEntities:"db-primary-vol",            severity:"Low"      as const, category:"Infrastructure"    as Category, description:"Disk will reach 95% in ~4h at current write rate",                      status:"Active"   as const, startTime:"14:33", endTime:"—",     duration:"—"      },
+];
+const ALL_ISSUES: IssueRow[] = RAW_ISSUES.map(r => ({ ...r, ts: tsOf(r.startTime) }));
+
 const KPI_DATA: { category: Category; total: number; critical: number; errors: number }[] = [
   { category: "Availability",     total: 6,  critical: 3, errors: 2 },
   { category: "Performance",      total: 4,  critical: 2, errors: 1 },
@@ -83,7 +70,9 @@ const KPI_DATA: { category: Category; total: number; critical: number; errors: n
   { category: "Security",         total: 2,  critical: 1, errors: 1 },
 ];
 
-const TIME_RANGE_OPTIONS = ["5 min","10 min","15 min","30 min","1 hr","6 hr","24 hr","7 days","30 days","Custom"];
+// Time presets: 30-day removed, max 7 days enforced
+const TIME_RANGE_OPTIONS = ["5 min","10 min","15 min","30 min","1 hr","6 hr","24 hr","7 days","Custom"];
+const MAX_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -106,7 +95,6 @@ function SevChip({ sev }: { sev: IssueRow["severity"] }) {
   return <span className={`inline-flex items-center px-1.5 py-0.5 rounded-sm border text-[10px] ${cfg[sev]}`} style={{ fontFamily:"'JetBrains Mono', monospace", fontWeight:500 }}>{sev}</span>;
 }
 
-// Custom tooltip for graph
 function GraphTooltip({ active, payload, label, activeTool }: any) {
   if (!active || !payload?.length) return null;
   const isAll = activeTool === "all";
@@ -135,6 +123,53 @@ function GraphTooltip({ active, payload, label, activeTool }: any) {
   );
 }
 
+// ─── Issue Details modal ──────────────────────────────────────────────────────
+function IssueDetailsModal({ row, onClose }: { row: IssueRow | null; onClose: () => void }) {
+  if (!row) return null;
+  const mono = { fontFamily: "'JetBrains Mono', monospace" };
+  const sans = { fontFamily: "'Inter', sans-serif" };
+  const fields: { label: string; value: string }[] = [
+    { label: "Issue ID",          value: row.issueId },
+    { label: "Sr. No.",           value: String(row.srNo) },
+    { label: "Source",            value: TOOL_MAP[row.source]?.name ?? row.source },
+    { label: "Application",       value: row.application },
+    { label: "Title",             value: row.title },
+    { label: "Affected Entities", value: row.affectedEntities },
+    { label: "Severity",          value: row.severity },
+    { label: "Category",          value: row.category },
+    { label: "Status",            value: row.status },
+    { label: "Start Time",        value: row.startTime },
+    { label: "End Time",          value: row.endTime },
+    { label: "Duration",          value: row.duration },
+    { label: "Description",       value: row.description },
+  ];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-2xl max-h-[85vh] bg-card border border-border rounded-sm shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between px-5 py-3 border-b border-border">
+          <div>
+            <p className="text-muted-foreground" style={{ ...mono, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Issue Details</p>
+            <h2 className="text-foreground mt-0.5" style={{ ...sans, fontSize: 16, fontWeight: 600 }}>{row.title}</h2>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-sm hover:bg-secondary text-muted-foreground hover:text-foreground">
+            <XIcon className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+            {fields.map(f => (
+              <div key={f.label} className={f.label === "Description" ? "sm:col-span-2" : ""}>
+                <p className="text-muted-foreground mb-1" style={{ ...sans, fontSize: 11 }}>{f.label}</p>
+                <p className="text-foreground" style={{ ...mono, fontSize: 12, lineHeight: 1.5, wordBreak: "break-word" }}>{f.value || "—"}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function DashboardView() {
@@ -149,14 +184,24 @@ export function DashboardView() {
   const [sections, setSections] = useState({ issueDetails: true, kpis: true, graph: true });
   function toggleSection(k: keyof typeof sections) { setSections(p => ({ ...p, [k]: !p[k] })); }
 
-  // Active filter from card clicks
-  type ActiveFilter = { type: "status"; value: "Active"|"Resolved"|"all" } | { type: "category"; value: Category } | null;
-  const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null);
-  function setFilter(f: ActiveFilter) { setActiveFilter(p => (JSON.stringify(p)===JSON.stringify(f) ? null : f)); }
+  // Filter state: status (Total/Active/Resolved) + multiple KPI categories (union)
+  const [statusFilter, setStatusFilter] = useState<"all" | "Active" | "Resolved" | null>(null);
+  const [categoryFilters, setCategoryFilters] = useState<Category[]>([]);
+  function toggleStatus(s: "all" | "Active" | "Resolved") {
+    setStatusFilter(p => p === s ? null : s);
+  }
+  function toggleCategory(c: Category) {
+    setCategoryFilters(p => p.includes(c) ? p.filter(x => x !== c) : [...p, c]);
+  }
+
+  // Hydration-safe clock (avoid SSR mismatch)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [, forceTick] = useState(0);
+  function bumpRefresh() { setLastUpdated(new Date()); forceTick(t => t + 1); }
 
   // Countdown
   const [countdown, setCountdown] = useState(parseInt(uiRefreshTime||"1") * 60);
-  const [lastUpdated] = useState(new Date());
+  useEffect(() => { setLastUpdated(new Date()); }, []);
   useEffect(() => {
     const secs = Math.max(1, parseInt(uiRefreshTime || "1")) * 60;
     setCountdown(secs);
@@ -164,39 +209,108 @@ export function DashboardView() {
     return () => clearInterval(id);
   }, [uiRefreshTime]);
 
-  const fmtDate = (d: Date) => d.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" }) + ", " + d.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true });
+  const fmtDate = (d: Date | null) => {
+    if (!d) return "—";
+    return d.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" }) + ", " + d.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true });
+  };
 
   // Log table state
-  const [logSearch, setLogSearch]     = useState("");
   const [logSort, setLogSort]         = useState<{ col: keyof IssueRow; dir: "asc"|"desc" }>({ col:"srNo", dir:"asc" });
   const [showEntries, setShowEntries] = useState(10);
   const [logPage, setLogPage]         = useState(1);
   const [exportOpen, setExportOpen]   = useState(false);
   const [copiedId, setCopiedId]       = useState<string|null>(null);
+  const [detailsRow, setDetailsRow]   = useState<IssueRow | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
-  // Close export dropdown when clicking outside
   useEffect(() => {
     function handler(e: MouseEvent) { if (exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false); }
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Filtered issues (by tool, keyword, activeFilter)
+  // Time range validation
+  const isCustom = timeRange === "Custom";
+  const customRangeError = useMemo(() => {
+    if (!isCustom || !startTime || !endTime) return null;
+    const s = new Date(startTime).getTime();
+    const e = new Date(endTime).getTime();
+    if (isNaN(s) || isNaN(e)) return null;
+    if (e <= s) return "End time must be after start time.";
+    if (e - s > MAX_RANGE_MS) return "Maximum selectable range is 7 days.";
+    return null;
+  }, [isCustom, startTime, endTime]);
+
+  // ── Global filter pipeline ───────────────────────────────────────────────
+  // 1. tool filter   2. keyword search (global)   3. status (Total/Active/Resolved)
+  // 4. categories (union)  — when combined with status, it's status AND union(categories)
   const filteredIssues = useMemo(() => {
     let rows = activeTool === "all" ? ALL_ISSUES : ALL_ISSUES.filter(r => r.source === activeTool);
     if (keyword) {
       const kw = keyword.toLowerCase();
-      rows = rows.filter(r => r.title.toLowerCase().includes(kw) || r.description.toLowerCase().includes(kw) || r.issueId.toLowerCase().includes(kw) || r.application.toLowerCase().includes(kw));
+      rows = rows.filter(r =>
+        r.title.toLowerCase().includes(kw) ||
+        r.description.toLowerCase().includes(kw) ||
+        r.issueId.toLowerCase().includes(kw) ||
+        r.application.toLowerCase().includes(kw) ||
+        r.affectedEntities.toLowerCase().includes(kw) ||
+        r.category.toLowerCase().includes(kw)
+      );
     }
-    if (activeFilter?.type === "status") {
-      if (activeFilter.value !== "all") rows = rows.filter(r => r.status === activeFilter.value);
-    } else if (activeFilter?.type === "category") {
-      rows = rows.filter(r => r.category === activeFilter.value);
+    if (statusFilter && statusFilter !== "all") {
+      rows = rows.filter(r => r.status === statusFilter);
+    }
+    if (categoryFilters.length > 0) {
+      rows = rows.filter(r => categoryFilters.includes(r.category));
     }
     return rows;
-  }, [activeTool, keyword, activeFilter]);
+  }, [activeTool, keyword, statusFilter, categoryFilters]);
 
+  // Per-section counts always reflect global filter
+  const total    = filteredIssues.length;
+  const active   = filteredIssues.filter(r => r.status === "Active").length;
+  const resolved = filteredIssues.filter(r => r.status === "Resolved").length;
+
+  function toolBreakdown(filter?: "Active"|"Resolved") {
+    const src = filter ? filteredIssues.filter(r => r.status === filter) : filteredIssues;
+    return TOOLS.map(t => {
+      const c = src.filter(r => r.source === t.id).length;
+      return c > 0 ? `${t.shortName} ${c}` : null;
+    }).filter(Boolean).join(" | ") || "—";
+  }
+
+  // ── Evaluation Matrix derived from filteredIssues ──────────────────────
+  // Columns: one per (Application, Source) pair present in current data,
+  // ordered Application-first (recent issue desc), tiebreak by Source A→Z.
+  const matrixCols = useMemo(() => {
+    type Col = { app: string; tool: Tool; toolName: string; mostRecent: number };
+    const map = new Map<string, Col>();
+    filteredIssues.forEach(r => {
+      const key = `${r.application}::${r.source}`;
+      const prev = map.get(key);
+      if (!prev || r.ts > prev.mostRecent) {
+        map.set(key, { app: r.application, tool: r.source, toolName: TOOL_MAP[r.source]?.name ?? r.source, mostRecent: Math.max(prev?.mostRecent ?? -1, r.ts) });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => {
+      // App primary: app with most recent issue first (across all its sources)
+      const aAppMax = Math.max(...Array.from(map.values()).filter(x => x.app === a.app).map(x => x.mostRecent));
+      const bAppMax = Math.max(...Array.from(map.values()).filter(x => x.app === b.app).map(x => x.mostRecent));
+      if (bAppMax !== aAppMax) return bAppMax - aAppMax;
+      if (a.app !== b.app) return a.app.localeCompare(b.app);
+      // Same app, same timestamp: alphabetical Source
+      return a.toolName.localeCompare(b.toolName);
+    });
+  }, [filteredIssues]);
+
+  // Matrix cell counts: per (category, col) → {current, total}
+  function cellCounts(cat: Category, app: string, source: Tool) {
+    const matches = filteredIssues.filter(r => r.category === cat && r.application === app && r.source === source);
+    const current = matches.filter(r => r.status === "Active").length;
+    return { current, total: matches.length };
+  }
+
+  // ── Sorting & pagination for issues table ──────────────────────────────
   const sortedIssues = useMemo(() => {
     return [...filteredIssues].sort((a, b) => {
       const av = String(a[logSort.col]), bv = String(b[logSort.col]);
@@ -204,7 +318,6 @@ export function DashboardView() {
     });
   }, [filteredIssues, logSort]);
 
-  // Additional log-table search (separate from keyword)
   const [tableSearch, setTableSearch] = useState("");
   const tableFiltered = useMemo(() => {
     if (!tableSearch) return sortedIssues;
@@ -220,26 +333,20 @@ export function DashboardView() {
     setLogPage(1);
   }
 
-  // Issue summary counts
-  const toolIssues = activeTool === "all" ? ALL_ISSUES : ALL_ISSUES.filter(r => r.source === activeTool);
-  const total    = toolIssues.length;
-  const active   = toolIssues.filter(r => r.status === "Active").length;
-  const resolved = toolIssues.filter(r => r.status === "Resolved").length;
-
-  // Per-tool breakdown string e.g. "DT 4 | OPM 3"
-  function toolBreakdown(filter?: "Active"|"Resolved") {
-    const src = filter ? toolIssues.filter(r => r.status === filter) : toolIssues;
-    return TOOLS.map(t => {
-      const c = src.filter(r => r.source === t.id).length;
-      return c > 0 ? `${t.shortName} ${c}` : null;
-    }).filter(Boolean).join(" | ") || "—";
+  function clearAllFilters() {
+    setKeyword("");
+    setStatusFilter(null);
+    setCategoryFilters([]);
+    setTableSearch("");
   }
 
-  // Matrix cols filtered by activeTool
-  const visibleCols = activeTool === "all" ? MATRIX_COLS : MATRIX_COLS.filter(c => c.tool === activeTool);
-  const visibleColIdxs = visibleCols.map(c => MATRIX_COLS.indexOf(c));
+  function handleManualRefresh() {
+    clearAllFilters();
+    bumpRefresh();
+    setCountdown(Math.max(1, parseInt(uiRefreshTime || "1")) * 60);
+  }
 
-  // Export helpers
+  // Export
   function exportCSV() {
     const headers = ["Sr.No","Source","Issue ID","Application","Title","Affected Entities","Severity","Category","Description","Status","Start Time","End Time","Duration"];
     const rows = tableFiltered.map(r => [r.srNo,r.source,r.issueId,r.application,r.title,r.affectedEntities,r.severity,r.category,`"${r.description}"`,r.status,r.startTime,r.endTime,r.duration].join(","));
@@ -263,11 +370,11 @@ export function DashboardView() {
     navigator.clipboard.writeText(text).then(() => { setCopiedId(row.id); setTimeout(() => setCopiedId(null), 1500); });
   }
 
-  const isCustom = timeRange === "Custom";
   const mono = { fontFamily: "'JetBrains Mono', monospace" };
   const sans = { fontFamily: "'Inter', sans-serif" };
-
   const activeToolConfig = TOOL_MAP[activeTool];
+
+  const filterActive = !!keyword || !!statusFilter || categoryFilters.length > 0 || !!tableSearch;
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-background" style={{ scrollbarWidth: "none" }}>
@@ -282,25 +389,24 @@ export function DashboardView() {
           </h1>
         </div>
         <div className="flex items-center gap-3">
+          {/* Manual Refresh */}
+          <button onClick={handleManualRefresh} title="Refresh dashboard and clear filters"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            style={{ ...sans, fontSize: 12, fontWeight: 500 }}>
+            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </button>
           {/* UI Refresh Time */}
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-secondary border border-border rounded-sm">
             <span className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>UI Refresh</span>
-            <input
-              type="number" min="1" max="60" value={uiRefreshTime}
+            <input type="number" min="1" max="60" value={uiRefreshTime}
               onChange={e => setUiRefreshTime(e.target.value)}
-              className="w-10 bg-transparent text-foreground outline-none text-center"
-              style={{ ...mono, fontSize: 11 }}
-            />
+              className="w-10 bg-transparent text-foreground outline-none text-center" style={{ ...mono, fontSize: 11 }} />
             <span className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>min</span>
           </div>
-          {/* Keyword search */}
+          {/* Global keyword search */}
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-secondary border border-border rounded-sm">
-            <input
-              value={keyword} onChange={e => setKeyword(e.target.value)}
-              placeholder="Enter Keyword"
-              className="bg-transparent text-foreground placeholder:text-muted-foreground outline-none w-32"
-              style={{ ...sans, fontSize: 12 }}
-            />
+            <input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="Search dashboard"
+              className="bg-transparent text-foreground placeholder:text-muted-foreground outline-none w-36" style={{ ...sans, fontSize: 12 }} />
             <Search className="w-3.5 h-3.5 text-muted-foreground" />
           </div>
         </div>
@@ -308,24 +414,34 @@ export function DashboardView() {
 
       {/* ── Status bar ── */}
       <div className="flex items-center justify-between px-5 py-1.5 border-b border-border/40 bg-secondary/30">
-        <p style={{ ...mono, fontSize: 10, color: "var(--muted-foreground)" }}>
+        <p style={{ ...mono, fontSize: 10, color: "var(--muted-foreground)" }} suppressHydrationWarning>
           Last Data Retrieved: {fmtDate(lastUpdated)} &nbsp;|&nbsp; Last Data Loaded: {fmtDate(lastUpdated)}
         </p>
-        <p style={{ ...mono, fontSize: 10, color: "var(--muted-foreground)" }}>
+        <p style={{ ...mono, fontSize: 10, color: "var(--muted-foreground)" }} suppressHydrationWarning>
           Last Update Checked: {fmtDate(lastUpdated)} &nbsp;|&nbsp;
           <span style={{ color: "var(--primary)" }}>Next Refresh in: {countdown}s</span>
         </p>
       </div>
 
+      {/* ── Active filter bar ── */}
+      {filterActive && (
+        <div className="flex items-center gap-2 px-5 py-2 border-b border-border/40 bg-primary/5 flex-wrap">
+          <span className="text-muted-foreground" style={{ ...mono, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>Active Filters</span>
+          {keyword && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border border-border bg-card text-foreground" style={{ ...mono, fontSize: 10 }}>Search: "{keyword}"</span>}
+          {statusFilter && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border border-border bg-card text-foreground" style={{ ...mono, fontSize: 10 }}>Status: {statusFilter}</span>}
+          {categoryFilters.map(c => <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border border-border bg-card text-foreground" style={{ ...mono, fontSize: 10 }}>Category: {c}</span>)}
+          <button onClick={clearAllFilters} className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-muted-foreground hover:text-foreground" style={{ ...sans, fontSize: 11 }}>
+            <XIcon className="w-3 h-3" /> Clear all
+          </button>
+        </div>
+      )}
+
       {/* ── Tools + time range bar ── */}
       <div className="flex items-center justify-between gap-3 px-5 py-2.5 border-b border-border">
-        {/* Tool pills */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-muted-foreground" style={{ ...mono, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>TOOLS</span>
           <div className="w-px h-4 bg-border mx-1" />
-          {/* All */}
-          <button
-            onClick={() => setActiveTool("all")}
+          <button onClick={() => setActiveTool("all")}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-sm border transition-all ${activeTool === "all" ? "border-border bg-card text-foreground" : "border-border/50 text-muted-foreground hover:text-foreground"}`}
             style={{ ...sans, fontSize: 12 }}>
             {activeTool === "all" && <Check className="w-3 h-3 text-primary" />}
@@ -345,7 +461,6 @@ export function DashboardView() {
           })}
         </div>
 
-        {/* Time controls */}
         <div className="flex items-center gap-2 shrink-0">
           <Calendar className="w-4 h-4 text-muted-foreground" />
           <input type="datetime-local" value={startTime} onChange={e => setStartTime(e.target.value)}
@@ -366,22 +481,27 @@ export function DashboardView() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-5 px-5 py-4">
+      {customRangeError && (
+        <div className="px-5 py-1.5 border-b border-[#e5534b]/30 bg-[#e5534b]/10 text-[#e5534b]" style={{ ...sans, fontSize: 11 }}>
+          {customRangeError}
+        </div>
+      )}
 
-        {/* ── Issue Details ── */}
+      <div className="flex flex-col gap-5 px-5 py-4">
+        {/* ── Issue Details (status cards) ── */}
         <div>
           <SectionHeader title="Issue Details" open={sections.issueDetails} onToggle={() => toggleSection("issueDetails")} />
           {sections.issueDetails && (
             <div className="flex gap-3 mt-3 flex-wrap">
-              {[
-                { label: "Total", count: total, breakdown: toolBreakdown(), filter: { type: "status" as const, value: "all" as const } },
-                { label: "Active", count: active, breakdown: toolBreakdown("Active"), filter: { type: "status" as const, value: "Active" as const } },
-                { label: "Resolved", count: resolved, breakdown: toolBreakdown("Resolved"), filter: { type: "status" as const, value: "Resolved" as const } },
-              ].map(card => {
-                const isActive = activeFilter?.type === "status" && activeFilter.value === card.filter.value;
+              {([
+                { label: "Total",    count: total,    breakdown: toolBreakdown(),          value: "all"      as const },
+                { label: "Active",   count: active,   breakdown: toolBreakdown("Active"),  value: "Active"   as const },
+                { label: "Resolved", count: resolved, breakdown: toolBreakdown("Resolved"),value: "Resolved" as const },
+              ]).map(card => {
+                const isSelected = statusFilter === card.value;
                 return (
-                  <button key={card.label} onClick={() => setFilter(card.filter)}
-                    className={`flex flex-col gap-1.5 px-4 py-3 rounded-sm border text-left transition-all min-w-40 ${isActive ? "border-primary/50 bg-primary/5" : "border-border bg-card hover:border-border/80 hover:bg-secondary/40"}`}>
+                  <button key={card.label} onClick={() => toggleStatus(card.value)}
+                    className={`flex flex-col gap-1.5 px-4 py-3 rounded-sm border text-left transition-all min-w-40 ${isSelected ? "border-primary ring-2 ring-primary/40 bg-primary/5" : "border-border bg-card hover:border-border/80 hover:bg-secondary/40"}`}>
                     <p className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>{card.label}</p>
                     <p className="text-foreground" style={{ ...mono, fontSize: 26, fontWeight: 600, lineHeight: 1 }}>{card.count}</p>
                     <p className="text-muted-foreground" style={{ ...mono, fontSize: 10 }}>{card.breakdown}</p>
@@ -398,13 +518,13 @@ export function DashboardView() {
           {sections.kpis && (
             <div className="flex gap-2.5 mt-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
               {KPI_DATA.map(kpi => {
-                const isActive = activeFilter?.type === "category" && activeFilter.value === kpi.category;
-                const toolCount = activeTool === "all" ? toolIssues.filter(r => r.category === kpi.category).length : toolIssues.filter(r => r.category === kpi.category).length;
+                const isSelected = categoryFilters.includes(kpi.category);
+                const count = filteredIssues.filter(r => r.category === kpi.category).length;
                 return (
-                  <button key={kpi.category} onClick={() => setFilter({ type: "category", value: kpi.category })}
-                    className={`flex flex-col gap-1.5 px-4 py-3 rounded-sm border text-left transition-all shrink-0 min-w-44 ${isActive ? "border-primary/50 bg-primary/5" : "border-border bg-card hover:border-border/80 hover:bg-secondary/40"}`}>
+                  <button key={kpi.category} onClick={() => toggleCategory(kpi.category)}
+                    className={`flex flex-col gap-1.5 px-4 py-3 rounded-sm border text-left transition-all shrink-0 min-w-44 ${isSelected ? "border-primary ring-2 ring-primary/40 bg-primary/5" : "border-border bg-card hover:border-border/80 hover:bg-secondary/40"}`}>
                     <p className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>{kpi.category}</p>
-                    <p className="text-foreground" style={{ ...mono, fontSize: 24, fontWeight: 600, lineHeight: 1 }}>{toolCount}</p>
+                    <p className="text-foreground" style={{ ...mono, fontSize: 24, fontWeight: 600, lineHeight: 1 }}>{count}</p>
                     <p className="text-muted-foreground" style={{ ...mono, fontSize: 10 }}>Critical {kpi.critical} | Error {kpi.errors}</p>
                   </button>
                 );
@@ -420,17 +540,16 @@ export function DashboardView() {
             <div className="mt-3 bg-card border border-border rounded-sm p-4">
               <p className="text-foreground mb-1" style={{ ...sans, fontSize: 12, fontWeight: 500 }}>Total Issues</p>
               <p className="text-muted-foreground mb-3" style={{ ...mono, fontSize: 10 }}>
-                {activeTool === "all" ? "All Sources" : activeToolConfig?.name} · {timeRange}
+                {activeTool === "all" ? "All Sources" : activeToolConfig?.name} · {timeRange}{filterActive ? " · filtered" : ""}
               </p>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={GRAPH_DATA[activeTool]} margin={{ top: 10, right: 16, left: -15, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="time" tick={{ fill: "#6b7080", fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fill: "#6b7080", fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }} tickLine={false} axisLine={false} label={{ value: "Count", angle: -90, position: "insideLeft", fill: "#6b7080", fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(127,127,127,0.15)" />
+                  <XAxis dataKey="time" tick={{ fill: "var(--muted-foreground)", fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: "var(--muted-foreground)", fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }} tickLine={false} axisLine={false} label={{ value: "Count", angle: -90, position: "insideLeft", fill: "var(--muted-foreground)", fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }} />
                   <Tooltip content={(props: any) => <GraphTooltip {...props} activeTool={activeTool} />} />
                   <Line key="line-total" name="Total" type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={2} dot={{ fill: "#6366f1", r: 4 }}
-                    label={{ fill: "#a0a5b4", fontSize: 9, fontFamily: "'JetBrains Mono', monospace", position: "top" }} />
-                  {/* Hidden lines for tooltip data */}
+                    label={{ fill: "var(--muted-foreground)", fontSize: 9, fontFamily: "'JetBrains Mono', monospace", position: "top" }} />
                   {activeTool === "all" && TOOLS.map(t => (
                     <Line key={`line-${t.id}`} name={t.name} type="monotone" dataKey={t.id} stroke={t.color} strokeWidth={0} dot={false} legendType="none" />
                   ))}
@@ -442,65 +561,61 @@ export function DashboardView() {
 
         {/* ── Evaluation Matrix ── */}
         <div>
-          <p className="mb-3" style={{ ...sans, fontSize: 14, fontWeight: 600, color: "white" }}>Evaluation Matrix</p>
+          <p className="mb-3 text-foreground" style={{ ...sans, fontSize: 14, fontWeight: 600 }}>Evaluation Matrix</p>
           <div className="rounded-sm border border-border overflow-hidden" style={{ background: "white" }}>
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                {/* Row 1: tool source headers */}
-                <tr style={{ background: "#1e2028" }}>
-                  <th rowSpan={2} className="text-left px-3 py-2 border border-gray-200/20" style={{ ...mono, fontSize: 10, color: "white", minWidth: 130 }}>
-                    CATEGORY /<br />APPLICATIONS
-                  </th>
-                  {(() => {
-                    // Group consecutive same-tool columns
-                    const groups: { tool: Tool; name: string; span: number }[] = [];
-                    visibleCols.forEach(c => {
-                      const last = groups[groups.length - 1];
-                      if (last && last.tool === c.tool) last.span++;
-                      else groups.push({ tool: c.tool, name: c.toolName, span: 1 });
-                    });
-                    return groups.map((g, i) => (
-                      <th key={i} colSpan={g.span} className="text-center px-2 py-2 border border-gray-200/20" style={{ ...mono, fontSize: 10, color: TOOL_MAP[g.tool]?.color ?? "white" }}>
-                        {g.name}
-                      </th>
-                    ));
-                  })()}
-                </tr>
-                {/* Row 2: application names */}
-                <tr style={{ background: "#2a2d38" }}>
-                  {visibleCols.map((c, i) => (
-                    <th key={i} className="text-center px-2 py-2 border border-gray-200/20 whitespace-nowrap" style={{ ...mono, fontSize: 9, color: "#a0a5b4" }}>
-                      {c.app}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  {/* Row 1: Application (first) */}
+                  <tr style={{ background: "white" }}>
+                    <th rowSpan={2} className="text-left px-3 py-2 border border-gray-300" style={{ ...mono, fontSize: 10, color: "black", minWidth: 130 }}>
+                      CATEGORY /<br />APPLICATIONS
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {CATEGORIES.map(cat => {
-                  const rowCells = MATRIX_DATA[cat];
-                  const catTotal = visibleColIdxs.reduce((s, ci) => s + rowCells[ci].total, 0);
-                  const catCurrent = visibleColIdxs.reduce((s, ci) => s + rowCells[ci].current, 0);
-                  return (
-                    <tr key={cat} className="border-b border-gray-200">
-                      <td className="px-3 py-2 border border-gray-200 bg-[#1e2028]" style={{ ...mono, fontSize: 11, color: "white" }}>
-                        {cat}<br />
-                        <span style={{ fontSize: 10, color: "#a0a5b4" }}>{catCurrent}/{catTotal}</span>
-                      </td>
-                      {visibleColIdxs.map((ci, j) => {
-                        const cell = rowCells[ci];
-                        const hasActive = cell.current > 0;
-                        return (
-                          <td key={j} className="text-center px-2 py-2 border border-gray-200"
-                            style={{ background: hasActive ? "#ef4444" : "#22c55e", color: "white" }}>
-                            <span style={{ ...mono, fontSize: 11, fontWeight: 500 }}>{cell.current}/{cell.total}</span>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                    {matrixCols.length === 0 ? (
+                      <th className="text-center px-2 py-2 border border-gray-300" style={{ ...mono, fontSize: 10, color: "black" }}>No data</th>
+                    ) : matrixCols.map((c, i) => (
+                      <th key={`app-${i}`} className="text-center px-2 py-2 border border-gray-300 whitespace-nowrap" style={{ ...mono, fontSize: 10, color: "black", background: "white" }}>
+                        {c.app}
+                      </th>
+                    ))}
+                  </tr>
+                  {/* Row 2: Source (immediately after Application) */}
+                  <tr style={{ background: "white" }}>
+                    {matrixCols.map((c, i) => (
+                      <th key={`src-${i}`} className="text-center px-2 py-2 border border-gray-300 whitespace-nowrap" style={{ ...mono, fontSize: 9, color: "black", background: "white" }}>
+                        {c.toolName}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {CATEGORIES.map(cat => {
+                    const rowCells = matrixCols.map(c => cellCounts(cat, c.app, c.tool));
+                    const catTotal = rowCells.reduce((s, x) => s + x.total, 0);
+                    const catCurrent = rowCells.reduce((s, x) => s + x.current, 0);
+                    return (
+                      <tr key={cat}>
+                        <td className="px-3 py-2 border border-gray-300" style={{ ...mono, fontSize: 11, color: "black", background: "white" }}>
+                          {cat}<br />
+                          <span style={{ fontSize: 10, color: "#555" }}>{catCurrent}/{catTotal}</span>
+                        </td>
+                        {rowCells.map((cell, j) => {
+                          const hasActive = cell.current > 0;
+                          const hasAny = cell.total > 0;
+                          const bg = hasActive ? "#fde2e1" : hasAny ? "#dcf5e3" : "white";
+                          return (
+                            <td key={j} className="text-center px-2 py-2 border border-gray-300"
+                              style={{ background: bg, color: "black" }}>
+                              <span style={{ ...mono, fontSize: 11, fontWeight: 500 }}>{cell.current}/{cell.total}</span>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
@@ -509,7 +624,6 @@ export function DashboardView() {
           <div className="flex items-center justify-between mb-3">
             <p className="text-foreground" style={{ ...sans, fontSize: 14, fontWeight: 600 }}>All Issues Log</p>
             <div className="flex items-center gap-2">
-              {/* Export */}
               <div className="relative" ref={exportRef}>
                 <button onClick={() => setExportOpen(o => !o)}
                   className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
@@ -518,13 +632,12 @@ export function DashboardView() {
                   <ChevronDown className="w-3 h-3" />
                 </button>
                 {exportOpen && (
-                  <div className="absolute left-0 top-full mt-1 w-36 bg-card border border-border rounded-sm shadow-xl z-20 py-1">
+                  <div className="absolute right-0 top-full mt-1 w-36 bg-card border border-border rounded-sm shadow-xl z-20 py-1">
                     <button onClick={() => { exportCSV(); setExportOpen(false); }} className="w-full text-left px-3 py-2 text-foreground hover:bg-secondary transition-colors" style={{ ...sans, fontSize: 12 }}>Export CSV</button>
                     <button onClick={() => { exportExcel(); setExportOpen(false); }} className="w-full text-left px-3 py-2 text-foreground hover:bg-secondary transition-colors" style={{ ...sans, fontSize: 12 }}>Export Excel</button>
                   </div>
                 )}
               </div>
-              {/* Pagination arrows */}
               <button onClick={() => setLogPage(p => Math.max(1, p - 1))} disabled={logPage === 1}
                 className="px-2 py-1.5 border border-border rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors" style={{ ...mono, fontSize: 11 }}>‹</button>
               <button onClick={() => setLogPage(p => Math.min(totalPages, p + 1))} disabled={logPage === totalPages}
@@ -532,7 +645,6 @@ export function DashboardView() {
             </div>
           </div>
 
-          {/* Table controls */}
           <div className="flex items-center justify-between mb-2 gap-3">
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground" style={{ ...sans, fontSize: 12 }}>Show</span>
@@ -551,7 +663,6 @@ export function DashboardView() {
             </div>
           </div>
 
-          {/* Table */}
           <div className="bg-card border border-border rounded-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1100px]">
@@ -592,7 +703,7 @@ export function DashboardView() {
                   ) : pageRows.map(row => {
                     const toolCfg = TOOL_MAP[row.source];
                     return (
-                      <tr key={row.id} className="border-b border-border/40 hover:bg-secondary/30 transition-colors">
+                      <tr key={row.id} onClick={() => setDetailsRow(row)} className="border-b border-border/40 hover:bg-secondary/30 transition-colors cursor-pointer">
                         <td className="px-2.5 py-2 text-muted-foreground whitespace-nowrap" style={{ ...mono, fontSize: 11 }}>{row.srNo}</td>
                         <td className="px-2.5 py-2 whitespace-nowrap">
                           <span style={{ ...mono, fontSize: 11, color: toolCfg?.color, fontWeight: 500 }}>{toolCfg?.name}</span>
@@ -614,7 +725,7 @@ export function DashboardView() {
                         <td className="px-2.5 py-2 whitespace-nowrap text-muted-foreground" style={{ ...mono, fontSize: 10 }}>{row.startTime}</td>
                         <td className="px-2.5 py-2 whitespace-nowrap text-muted-foreground" style={{ ...mono, fontSize: 10 }}>{row.endTime}</td>
                         <td className="px-2.5 py-2 whitespace-nowrap text-muted-foreground" style={{ ...mono, fontSize: 10 }}>{row.duration}</td>
-                        <td className="px-2.5 py-2 whitespace-nowrap">
+                        <td className="px-2.5 py-2 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-1.5 justify-center">
                             <button onClick={() => copyIssue(row)} title="Copy issue details"
                               className={`p-1.5 rounded-sm border transition-colors ${copiedId === row.id ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:border-border/80"}`}>
@@ -632,7 +743,6 @@ export function DashboardView() {
                 </tbody>
               </table>
             </div>
-            {/* Pagination footer */}
             <div className="px-4 py-2.5 border-t border-border flex items-center justify-between">
               <span className="text-muted-foreground" style={{ ...mono, fontSize: 10 }}>
                 Showing {Math.min((logPage-1)*showEntries+1, tableFiltered.length)}–{Math.min(logPage*showEntries, tableFiltered.length)} of {tableFiltered.length} entries
@@ -652,6 +762,8 @@ export function DashboardView() {
 
         <div className="h-6 shrink-0" />
       </div>
+
+      <IssueDetailsModal row={detailsRow} onClose={() => setDetailsRow(null)} />
     </div>
   );
 }
