@@ -184,7 +184,14 @@ const SERVICE_DEFAULTS: Record<Tool, Partial<ServiceConfig> & { lastSync: string
   appdynamics: { baseUrl: "https://corp.saas.appdynamics.com",   endpoint: "/controller/rest/applications", lastSync: "12 min ago" },
 };
 
-function ServiceForm({ cfg, onChange }: { cfg: ServiceConfig; onChange: (c: ServiceConfig) => void }) {
+// ServiceForm now has two variants:
+//  - "summary": used under Monitoring Services > All Services. Basic Configuration
+//    only, always visible, no Collection Mode section at all (that only lives on
+//    the tool-specific sub-tab now).
+//  - "detail": used on a tool's own sub-tab. Basic Configuration + (if the mode,
+//    set by the toggle rendered ABOVE this component, is "live") the Live
+//    Authentication fields. Same fields/logic as before, just relocated.
+function ServiceForm({ cfg, onChange, variant = "detail" }: { cfg: ServiceConfig; onChange: (c: ServiceConfig) => void; variant?: "summary" | "detail" }) {
   const set = <K extends keyof ServiceConfig>(k: K, v: ServiceConfig[K]) => onChange({ ...cfg, [k]: v });
   return (
     <div className="grid gap-4">
@@ -205,17 +212,9 @@ function ServiceForm({ cfg, onChange }: { cfg: ServiceConfig; onChange: (c: Serv
         </div>
       </Card>
 
-      <Card title="Collection Mode" description="Controls how data is retrieved from this platform.">
-        <Segmented
-          value={cfg.mode}
-          onChange={v => set("mode", v)}
-          options={[{ value: "periodic", label: "Periodic (default)" }, { value: "live", label: "Live" }]}
-        />
-        <Banner>
-          Collection Mode controls how data is retrieved from this monitoring platform. It does <strong>not</strong> affect dashboard refresh, UI refresh interval, or client-side polling.
-        </Banner>
-        {cfg.mode === "live" && (
-          <div className="grid grid-cols-2 gap-4 mt-1 pt-3 border-t border-border/60">
+      {variant === "detail" && cfg.mode === "live" && (
+        <Card title="Live Authentication" description="Credentials used while Collection Mode is set to Live.">
+          <div className="grid grid-cols-2 gap-4">
             <Field label="Authentication Type">
               <select value={cfg.authType} onChange={e => set("authType", e.target.value as any)} className={inputCls} style={{ ...sans, fontSize: 12 }}>
                 <option value="bearer">Bearer Token</option>
@@ -228,8 +227,8 @@ function ServiceForm({ cfg, onChange }: { cfg: ServiceConfig; onChange: (c: Serv
             <Field label="Token Expiry (s)"><input type="number" value={cfg.tokenExpiry} onChange={e => set("tokenExpiry", e.target.value)} className={inputCls} style={{ ...mono, fontSize: 12 }} /></Field>
             <Field label="Refresh Token"><input value={cfg.refreshToken} onChange={e => set("refreshToken", e.target.value)} className={inputCls} style={{ ...mono, fontSize: 12 }} placeholder="optional" /></Field>
           </div>
-        )}
-      </Card>
+        </Card>
+      )}
     </div>
   );
 }
@@ -248,6 +247,15 @@ const NAV: { id: CategoryId; label: string; icon: any; description: string }[] =
   { id: "search",      label: "Search & Ranking",   icon: SlidersHorizontal,description: "Embeddings, hybrid, re-ranker" },
   { id: "performance", label: "Performance",        icon: Cpu,              description: "GPU & resources" },
   { id: "advanced",    label: "Advanced",           icon: Wrench,           description: "Prompt templates & paths" },
+];
+
+interface IssueCategory { id: string; name: string; keywords: string[] }
+const DEFAULT_ISSUE_CATS: IssueCategory[] = [
+  { id: "ic-1", name: "Availability",      keywords: ["down", "outage", "unreachable"] },
+  { id: "ic-2", name: "Performance",       keywords: ["slow", "latency", "timeout"] },
+  { id: "ic-3", name: "Infrastructure",    keywords: ["cpu", "memory", "disk", "pod"] },
+  { id: "ic-4", name: "Application Error", keywords: ["exception", "error", "5xx"] },
+  { id: "ic-5", name: "Security",          keywords: ["unauthorized", "jwt", "intrusion"] },
 ];
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -272,14 +280,17 @@ export function SettingsView() {
     appdynamics: { ...DEFAULT_SERVICE, ...SERVICE_DEFAULTS.appdynamics },
   }), []);
   const [services, setServices] = useState(initialServices);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const setService = (t: Exclude<Tool,"all">, c: ServiceConfig) => { setServices(s => ({ ...s, [t]: c })); markDirty(); };
 
   // ── DASHBOARD ─────────────────────────
-  const [defaultRange, setDefaultRange] = useState("15 min");
+  // "Default Time Range" -> "Periodic Fetch Time": how often the dashboard
+  // backend asks the MCP Orchestrator for fresh logs. Same options, new label.
+  const [periodicFetchTime, setPeriodicFetchTime] = useState("15 min");
   const [refreshInterval, setRefreshInterval] = useState(1);
   const [landingView, setLandingView] = useState("dashboard");
-  const [alertsPerPage, setAlertsPerPage] = useState(10);
+  // "Maximum Alerts Per Page" -> "Periodic Data Check Time": how often the
+  // dashboard backend's file-changed check (HEAD poll) runs, in seconds.
+  const [periodicCheckTime, setPeriodicCheckTime] = useState(30);
   const [sevVisible, setSevVisible] = useState({ Critical: true, High: true, Medium: true, Low: false });
   const [defaultSort, setDefaultSort] = useState("startTime-desc");
   const [showAck, setShowAck] = useState(false);
@@ -341,22 +352,67 @@ export function SettingsView() {
   const [vizPrompt, setVizPrompt] = useState("prompts/visualization.txt");
 
   // ── ISSUE CATEGORIZATION ──────────────
-  interface IssueCategory { id: string; name: string; keywords: string[] }
-  const [issueCats, setIssueCats] = useState<IssueCategory[]>([
-    { id: "ic-1", name: "Availability",      keywords: ["down", "outage", "unreachable"] },
-    { id: "ic-2", name: "Performance",       keywords: ["slow", "latency", "timeout"] },
-    { id: "ic-3", name: "Infrastructure",    keywords: ["cpu", "memory", "disk", "pod"] },
-    { id: "ic-4", name: "Application Error", keywords: ["exception", "error", "5xx"] },
-    { id: "ic-5", name: "Security",          keywords: ["unauthorized", "jwt", "intrusion"] },
-  ]);
+  // "General" (catTab === "all") is the original flat category editor,
+  // unchanged. Each tool now also gets its own independent category list,
+  // presented as a sub-tab — same UI/logic as Monitoring's All Services vs.
+  // per-tool split.
+  const [catTab, setCatTab] = useState<Tool>("all");
+  const [issueCats, setIssueCats] = useState<IssueCategory[]>(DEFAULT_ISSUE_CATS);
+  const cloneCategories = (cats: IssueCategory[]): IssueCategory[] =>
+    cats.map(c => ({
+      ...c,
+      keywords: [...c.keywords],
+    }));
+
+  const initialToolCats = useMemo<
+    Record<Exclude<Tool, "all">, IssueCategory[]>
+  >(() => ({
+    dynatrace: cloneCategories(DEFAULT_ISSUE_CATS),
+    opmanager: cloneCategories(DEFAULT_ISSUE_CATS),
+    heal: cloneCategories(DEFAULT_ISSUE_CATS),
+    appdynamics: cloneCategories(DEFAULT_ISSUE_CATS),
+  }), []);
+  const [toolIssueCats, setToolIssueCats] = useState(initialToolCats);
+
+  function overwriteToolCategories(
+    tool: Exclude<Tool, "all">
+  ) {
+    setToolIssueCats(prev => ({
+      ...prev,
+      [tool]: cloneCategories(issueCats),
+    }));
+    markDirty();
+  }
+
+  function restoreToolCategories(
+    tool: Exclude<Tool, "all">
+  ) {
+    setToolIssueCats(prev => ({
+      ...prev,
+      [tool]: cloneCategories(DEFAULT_ISSUE_CATS),
+    }));
+    markDirty();
+  }
+
   const [icKeywordInputs, setIcKeywordInputs] = useState<Record<string, string>>({});
   const [icWarnings, setIcWarnings] = useState<Record<string, string>>({});
   const [newCatName, setNewCatName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
 
+  // Active category list follows catTab — "all" = General, else that tool's list.
+  const activeCats = catTab === "all" ? issueCats : toolIssueCats[catTab as Exclude<Tool,"all">];
+  function setActiveCats(updater: (prev: IssueCategory[]) => IssueCategory[]) {
+    if (catTab === "all") {
+      setIssueCats(updater);
+    } else {
+      const key = catTab as Exclude<Tool,"all">;
+      setToolIssueCats(prev => ({ ...prev, [key]: updater(prev[key]) }));
+    }
+  }
+
   function findKeywordOwner(kw: string, exceptId?: string) {
-    return issueCats.find(c => c.id !== exceptId && c.keywords.some(k => k.toLowerCase() === kw.toLowerCase()));
+    return activeCats.find(c => c.id !== exceptId && c.keywords.some(k => k.toLowerCase() === kw.toLowerCase()));
   }
 
   function addCategoryKeyword(catId: string) {
@@ -367,33 +423,33 @@ export function SettingsView() {
       setIcWarnings(w => ({ ...w, [catId]: `"${raw}" already belongs to "${owner.name}". Duplicate keywords cause ambiguous categorization.` }));
       return;
     }
-    setIssueCats(cs => cs.map(c => c.id === catId ? { ...c, keywords: [...c.keywords, raw] } : c));
+    setActiveCats(cs => cs.map(c => c.id === catId ? { ...c, keywords: [...c.keywords, raw] } : c));
     setIcKeywordInputs(i => ({ ...i, [catId]: "" }));
     setIcWarnings(w => ({ ...w, [catId]: "" }));
     markDirty();
   }
 
   function removeCategoryKeyword(catId: string, kw: string) {
-    setIssueCats(cs => cs.map(c => c.id === catId ? { ...c, keywords: c.keywords.filter(k => k !== kw) } : c));
+    setActiveCats(cs => cs.map(c => c.id === catId ? { ...c, keywords: c.keywords.filter(k => k !== kw) } : c));
     markDirty();
   }
 
   function addNewCategory() {
     const n = newCatName.trim();
     if (!n) return;
-    setIssueCats(cs => [...cs, { id: `ic-${Date.now()}`, name: n, keywords: [] }]);
+    setActiveCats(cs => [...cs, { id: `ic-${Date.now()}`, name: n, keywords: [] }]);
     setNewCatName("");
     markDirty();
   }
 
   function deleteCategory(catId: string) {
-    setIssueCats(cs => cs.filter(c => c.id !== catId));
+    setActiveCats(cs => cs.filter(c => c.id !== catId));
     markDirty();
   }
 
   function commitRename(catId: string) {
     const n = editingName.trim();
-    if (n) setIssueCats(cs => cs.map(c => c.id === catId ? { ...c, name: n } : c));
+    if (n) setActiveCats(cs => cs.map(c => c.id === catId ? { ...c, name: n } : c));
     setEditingId(null); setEditingName("");
     markDirty();
   }
@@ -404,6 +460,14 @@ export function SettingsView() {
     const v = newKw.trim();
     if (!v || keywords.includes(v)) return;
     setKeywords([...keywords, v]); setNewKw(""); markDirty();
+  }
+
+  // ── Save wiring ───────────────────────
+  // Local-only for now (no backend call) — Save Changes just clears the
+  // dirty flag, same as the original file. Wire this to a real endpoint
+  // whenever routing/backend work is back in scope.
+  function handleSaveSettings() {
+    setDirty(false);
   }
 
   return (
@@ -508,18 +572,17 @@ export function SettingsView() {
                 })}
               </div>
 
-              {/* All services summary */}
+              {/* All services summary — Basic Configuration only, always open,
+                  no Collection Mode section (that lives on each tool's own tab). */}
               {monitorTab === "all" && (
                 <div className="grid gap-3">
                   {TOOLS.map(t => {
                     const cfg = services[t.id as Exclude<Tool,"all">];
-                    const isOpen = !!expanded[t.id];
                     const status: "connected"|"warning"|"error" = t.status === "online" ? "connected" : t.status === "degraded" ? "warning" : "error";
                     return (
                       <div key={t.id} className="bg-card border border-border rounded-sm">
-                        <button onClick={() => setExpanded(e => ({ ...e, [t.id]: !e[t.id] }))} className="w-full flex items-center justify-between gap-4 px-4 py-3 text-left hover:bg-secondary/40 transition-colors">
+                        <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-border/60">
                           <div className="flex items-center gap-3 min-w-0">
-                            {isOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
                             <div className="w-7 h-7 rounded-sm flex items-center justify-center" style={{ background: t.color + "22", color: t.color, ...mono, fontSize: 10, fontWeight: 700 }}>{t.shortName}</div>
                             <div className="min-w-0">
                               <p className="text-foreground" style={{ ...sans, fontSize: 13, fontWeight: 600 }}>{t.name}</p>
@@ -528,25 +591,23 @@ export function SettingsView() {
                           </div>
                           <div className="flex items-center gap-3 shrink-0">
                             <span className="text-muted-foreground hidden md:inline" style={{ ...mono, fontSize: 10 }}>Last Sync: {SERVICE_DEFAULTS[t.id].lastSync}</span>
-                            <span className="text-muted-foreground hidden md:inline" style={{ ...mono, fontSize: 10 }}>Mode: {cfg.mode}</span>
                             <StatusBadge status={status} />
-                            <span onClick={(e) => e.stopPropagation()} className="px-2 py-1 rounded-sm border border-border bg-secondary text-foreground hover:border-primary/40 hover:text-primary transition-colors cursor-pointer" style={{ ...sans, fontSize: 11 }}>
+                            <button className="px-2 py-1 rounded-sm border border-border bg-secondary text-foreground hover:border-primary/40 hover:text-primary transition-colors" style={{ ...sans, fontSize: 11 }}>
                               <span className="inline-flex items-center gap-1"><Plug className="w-3 h-3" /> Test</span>
-                            </span>
+                            </button>
                           </div>
-                        </button>
-                        {isOpen && (
-                          <div className="px-4 pb-4 pt-2 border-t border-border/60">
-                            <ServiceForm cfg={cfg} onChange={c => setService(t.id as Exclude<Tool,"all">, c)} />
-                          </div>
-                        )}
+                        </div>
+                        <div className="px-4 pb-4 pt-3">
+                          <ServiceForm cfg={cfg} onChange={c => setService(t.id as Exclude<Tool,"all">, c)} variant="summary" />
+                        </div>
                       </div>
                     );
                   })}
                 </div>
               )}
 
-              {/* Individual service tab */}
+              {/* Individual service tab — Collection Mode toggle lives up here,
+                  above Basic Configuration. Only visible on a tool's own tab. */}
               {monitorTab !== "all" && (
                 <div>
                   <div className="flex items-center gap-3 mb-4">
@@ -556,7 +617,20 @@ export function SettingsView() {
                       <p className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>{TOOL_MAP[monitorTab].description}</p>
                     </div>
                   </div>
-                  <ServiceForm cfg={services[monitorTab as Exclude<Tool,"all">]} onChange={c => setService(monitorTab as Exclude<Tool,"all">, c)} />
+
+                  <div className="mb-4 grid gap-2">
+                    <p className="text-foreground" style={{ ...sans, fontSize: 11, fontWeight: 500 }}>Collection Mode</p>
+                    <Segmented
+                      value={services[monitorTab as Exclude<Tool,"all">].mode}
+                      onChange={v => setService(monitorTab as Exclude<Tool,"all">, { ...services[monitorTab as Exclude<Tool,"all">], mode: v })}
+                      options={[{ value: "periodic", label: "Periodic (default)" }, { value: "live", label: "Live" }]}
+                    />
+                    <Banner>
+                      Collection Mode controls how data is retrieved from this monitoring platform. It does <strong>not</strong> affect dashboard refresh, UI refresh interval, or client-side polling.
+                    </Banner>
+                  </div>
+
+                  <ServiceForm cfg={services[monitorTab as Exclude<Tool,"all">]} onChange={c => setService(monitorTab as Exclude<Tool,"all">, c)} variant="detail" />
                 </div>
               )}
             </div>
@@ -569,8 +643,8 @@ export function SettingsView() {
 
               <Card title="Dashboard Defaults" description="Applied when the dashboard is first opened.">
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="Default Time Range">
-                    <select value={defaultRange} onChange={e => { setDefaultRange(e.target.value); markDirty(); }} className={inputCls} style={inputStyle}>
+                  <Field label="Periodic Fetch Time" hint="How often the dashboard backend asks the MCP Orchestrator for fresh logs.">
+                    <select value={periodicFetchTime} onChange={e => { setPeriodicFetchTime(e.target.value); markDirty(); }} className={inputCls} style={inputStyle}>
                       {["5 min","10 min","15 min","30 min","1 hr","6 hr","24 hr","7 days","30 days"].map(o => <option key={o}>{o}</option>)}
                     </select>
                   </Field>
@@ -582,7 +656,9 @@ export function SettingsView() {
                       <option value="settings">Settings</option>
                     </select>
                   </Field>
-                  <Field label="Maximum Alerts Per Page"><input type="number" value={alertsPerPage} onChange={e => { setAlertsPerPage(parseInt(e.target.value || "10")); markDirty(); }} className={inputCls} style={{ ...mono, fontSize: 12 }} /></Field>
+                  <Field label="Periodic Data Check Time (s)" hint="How often the dashboard backend checks File Storage for updates.">
+                    <input type="number" value={periodicCheckTime} onChange={e => { setPeriodicCheckTime(parseInt(e.target.value || "30")); markDirty(); }} className={inputCls} style={{ ...mono, fontSize: 12 }} />
+                  </Field>
                 </div>
               </Card>
 
@@ -828,9 +904,51 @@ export function SettingsView() {
           {/* ── ISSUE CATEGORIZATION ── */}
           {active === "issueCategorization" && (
             <div className="grid gap-5 max-w-5xl">
-              <SectionTitle hint="Define keyword-based issue categories. A keyword must belong to only one category.">Issue Categorization</SectionTitle>
+              <SectionTitle hint="Define keyword-based issue categories. A keyword must belong to only one category within its scope.">Issue Categorization</SectionTitle>
 
-              <Card title="Create Category" description="Add a new category. You can add keywords to it below.">
+              {/* Sub-tabs: General (unchanged flat editor) + one per tool,
+                  same pattern as Monitoring Services' All Services / per-tool split. */}
+              <div className="flex items-center gap-1 border-b border-border">
+                {([
+                  { id: "all" as Tool, label: "General" },
+                  ...TOOLS.map(t => ({ id: t.id, label: t.name })),
+                ]).map(t => {
+                  const isActive = catTab === t.id;
+                  return (
+                    <button key={t.id} onClick={() => setCatTab(t.id)}
+                      className={`px-3.5 py-2 -mb-px border-b-2 transition-colors ${isActive ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                      style={{ ...sans, fontSize: 12, fontWeight: isActive ? 600 : 500 }}>
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {catTab !== "all" && (
+                <div className="flex items-center gap-2 mb-4">
+                  <button
+                    onClick={() =>
+                      overwriteToolCategories(catTab as Exclude<Tool, "all">)
+                    }
+                    className="px-3 py-1.5 rounded-sm border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                    style={{ ...sans, fontSize: 12 }}
+                  >
+                    Overwrite Default
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      restoreToolCategories(catTab as Exclude<Tool, "all">)
+                    }
+                    className="px-3 py-1.5 rounded-sm border border-border bg-secondary text-foreground hover:border-primary/40 hover:text-primary transition-colors"
+                    style={{ ...sans, fontSize: 12 }}
+                  >
+                    Restore to Default
+                  </button>
+                </div>
+              )}
+
+              <Card title="Create Category" description={catTab === "all" ? "Add a new general category. You can add keywords to it below." : `Add a category specific to ${TOOL_MAP[catTab]?.name}. You can add keywords to it below.`}>
                 <div className="flex items-center gap-2">
                   <input value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Category name (e.g. Database)"
                     onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addNewCategory())}
@@ -842,7 +960,12 @@ export function SettingsView() {
               </Card>
 
               <div className="grid gap-3">
-                {issueCats.map(c => {
+                {activeCats.length === 0 && (
+                  <p className="text-muted-foreground" style={{ ...sans, fontSize: 12 }}>
+                    No {TOOL_MAP[catTab]?.name ?? ""} specific categories yet — this tool currently falls back to the General categorization above.
+                  </p>
+                )}
+                {activeCats.map(c => {
                   const inputVal = icKeywordInputs[c.id] ?? "";
                   const warning = icWarnings[c.id];
                   const isEditing = editingId === c.id;
@@ -923,7 +1046,8 @@ export function SettingsView() {
             <button onClick={() => setDirty(false)} className="px-3 py-1.5 rounded-sm border border-border bg-secondary text-foreground hover:border-border/80 transition-colors" style={{ ...sans, fontSize: 12 }}>
               Cancel
             </button>
-            <button onClick={() => setDirty(false)} className="flex items-center gap-1.5 px-4 py-1.5 rounded-sm bg-primary text-primary-foreground hover:opacity-90 transition-opacity" style={{ ...sans, fontSize: 12, fontWeight: 600 }}>
+            <button onClick={handleSaveSettings}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-sm bg-primary text-primary-foreground hover:opacity-90 transition-opacity" style={{ ...sans, fontSize: 12, fontWeight: 600 }}>
               <Save className="w-3.5 h-3.5" /> Save Changes
             </button>
           </div>
