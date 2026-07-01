@@ -1,0 +1,33 @@
+{
+  "updatedAt": "2026-07-01T00:00:00.000Z",
+  "usage": {
+    "totalTokens": 1284910,
+    "questionsToday": 342,
+    "requestsProcessed": 9217,
+    "totalConversations": 1043,
+    "promptTokens": 892103,
+    "completionTokens": 392807,
+    "avgResponseMs": 412,
+    "p95Ms": 1200,
+    "cacheHitRatePct": 64
+  },
+  "resources": {
+    "cachePct": 62,
+    "memoryPct": 48,
+    "gpuPct": 71,
+    "cpuPct": 34
+  },
+  "model": {
+    "name": "qwen2.5-7b-instruct",
+    "endpoint": "localhost:11434",
+    "device": "NVIDIA A10G · 24 GiB",
+    "status": "Healthy"
+  },
+  "bottom": {
+    "vectorStoreDocs": 48210,
+    "storageUsedGb": 3.4,
+    "storageTotalGb": 50,
+    "throughputTokPerSec": 142,
+    "errorRatePct": 0.3
+  }
+}

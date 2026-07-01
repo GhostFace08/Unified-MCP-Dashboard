@@ -1,5 +1,42 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Send, Paperclip, Sparkles, FileText, Image, Mic, Plus, X } from "lucide-react";
+import { Send, Paperclip, Sparkles, FileText, Image, Mic, Plus, X, MoreVertical, PencilLine, Trash2, Pin } from "lucide-react";
+import type { ChatRequestPayload, ChatResponsePayload } from "../types/contracts";
+
+const FALLBACK_REPLY = "Service is down, please try later.";
+const REQUEST_TIMEOUT_MS = 20_000;
+
+async function sendChatMessage(payload: ChatRequestPayload): Promise<ChatResponsePayload> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return { reply: FALLBACK_REPLY };
+    }
+
+    const data = await response.json().catch(() => null);
+    if (!data) {
+      return { reply: FALLBACK_REPLY };
+    }
+
+    const reply = data.reply ?? data.response ?? (typeof data === "string" ? data : null);
+    return {
+      reply: typeof reply === "string" && reply.trim() ? reply : FALLBACK_REPLY,
+      meta: data.meta,
+    };
+  } catch {
+    return { reply: FALLBACK_REPLY };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
 
 interface Message {
   id: string;
@@ -15,6 +52,8 @@ interface ChatSession {
   title: string;
   preview: string;
   createdAt: number;
+  pinned?: boolean;
+  pinnedAt?: number | null;
   messages: Message[];
 }
 
@@ -23,6 +62,8 @@ const SEED_SESSIONS: ChatSession[] = [
     id: "g-1", createdAt: Date.now() - 1000 * 60 * 60 * 2,
     title: "Incident analysis — DB pool",
     preview: "Root cause confirmed: DB connection pool exhaustion…",
+    pinned: true,
+    pinnedAt: Date.now() - 1000 * 60 * 30,
     messages: [
       { id: "1", role: "assistant", timestamp: "14:30", content: "Hello! I'm your MCP Observability AI. I have full context across all connected sources.\n\nWhat would you like to explore?" },
       { id: "2", role: "user",      timestamp: "14:31", content: "Summarise the active critical alerts right now." },
@@ -54,7 +95,8 @@ function formatContent(text: string) {
 
 export function ChatView() {
   const [sessions, setSessions] = useState<ChatSession[]>(SEED_SESSIONS);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(SEED_SESSIONS.find(s => s.pinned)?.id ?? SEED_SESSIONS[0]?.id ?? null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<{ name: string; size: string; type: string }[]>([]);
   const [loading, setLoading] = useState(false);
@@ -63,6 +105,15 @@ export function ChatView() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const active = useMemo(() => sessions.find(s => s.id === activeId) || null, [sessions, activeId]);
+  const sortedSessions = useMemo(() => [...sessions].sort((a, b) => {
+    const aPinned = !!a.pinned;
+    const bPinned = !!b.pinned;
+    if (aPinned !== bPinned) return aPinned ? -1 : 1;
+    if (aPinned && bPinned) {
+      return (b.pinnedAt ?? b.createdAt) - (a.pinnedAt ?? a.createdAt);
+    }
+    return b.createdAt - a.createdAt;
+  }), [sessions]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [active?.messages.length, activeId]);
 
@@ -77,6 +128,8 @@ export function ChatView() {
       createdAt: Date.now(),
       title: "New chat",
       preview: greeting.slice(0, 60),
+      pinned: false,
+      pinnedAt: null,
       messages: [{
         id: "init", role: "assistant",
         timestamp: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
@@ -85,13 +138,40 @@ export function ChatView() {
     };
     setSessions(p => [newSession, ...p]);
     setActiveId(id);
+    setOpenMenuId(null);
   }
 
-  // Auto-open a fresh blank conversation when AI Chat is opened.
-  useEffect(() => {
-    startNewChat();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  function renameChat(sessionId: string) {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return;
+    const nextTitle = window.prompt("Rename chat", session.title)?.trim();
+    if (!nextTitle) return;
+    setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title: nextTitle } : s));
+    setOpenMenuId(null);
+  }
+
+  function togglePinChat(sessionId: string) {
+    setSessions(prev => prev.map(s => s.id === sessionId ? {
+      ...s,
+      pinned: !s.pinned,
+      pinnedAt: !s.pinned ? Date.now() : null,
+    } : s));
+    setOpenMenuId(null);
+  }
+
+  function deleteChat(sessionId: string) {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return;
+    if (!window.confirm(`Delete "${session.title}"?`)) return;
+    setSessions(prev => {
+      const nextSessions = prev.filter(s => s.id !== sessionId);
+      if (activeId === sessionId) {
+        setActiveId(nextSessions[0]?.id ?? null);
+      }
+      return nextSessions;
+    });
+    setOpenMenuId(null);
+  }
 
   function handleFileAdd(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files; if (!f) return;
@@ -99,7 +179,7 @@ export function ChatView() {
     e.target.value = "";
   }
 
-  function sendMessage() {
+  async function sendMessage() {
     if (!active) return;
     if (!input.trim() && !files.length) return;
     const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -114,18 +194,25 @@ export function ChatView() {
     } : s));
     setInput(""); setFiles([]); setLoading(true);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-    setTimeout(() => {
+    try {
+      const history = active.messages
+        .filter(m => !m.thinking)
+        .map(m => ({ role: m.role, content: m.content }));
+      const response = await sendChatMessage({
+        sessionId: active.id,
+        message: userText,
+        history,
+      });
       const reply: Message = {
         id: Date.now() + "-r", role: "assistant",
         timestamp: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
-        content: `Analysing data from **all connected tools**…\n\nBased on current telemetry, I see elevated error rates correlating with recent deployments. Would you like a detailed breakdown or a remediation plan?`,
+        content: response.reply,
       };
       setSessions(p => p.map(s => s.id === active.id ? { ...s, messages: [...s.messages.filter(m => !m.thinking), reply] } : s));
+    } finally {
       setLoading(false);
-    }, 1400);
+    }
   }
-
-  const sortedSessions = useMemo(() => [...sessions].sort((a, b) => b.createdAt - a.createdAt), [sessions]);
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -145,15 +232,43 @@ export function ChatView() {
         <div className="px-2 py-2 flex flex-col gap-0.5">
           {sortedSessions.map(s => {
             const isActive = activeId === s.id;
+            const isPinned = !!s.pinned;
             return (
-              <button
-                key={s.id}
-                onClick={() => setActiveId(s.id)}
-                className={`flex flex-col w-full text-left px-2 py-2 rounded-sm transition-colors ${isActive ? "bg-secondary" : "hover:bg-secondary/60"}`}
-              >
-                <span className="text-foreground truncate" style={{ ...sans, fontSize: 12, fontWeight: isActive ? 500 : 400 }}>{s.title}</span>
-                <span className="text-muted-foreground truncate mt-0.5" style={{ ...mono, fontSize: 10 }}>{s.preview}</span>
-              </button>
+              <div key={s.id} className={`group relative rounded-sm transition-colors ${isActive ? "bg-secondary" : "hover:bg-secondary/60"}`}>
+                <button
+                  onClick={() => { setActiveId(s.id); setOpenMenuId(null); }}
+                  className="flex flex-col w-full text-left px-2 py-2 pr-10 rounded-sm"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-foreground truncate" style={{ ...sans, fontSize: 12, fontWeight: isActive ? 500 : 400 }}>{s.title}</span>
+                    {isPinned && <Pin className="w-3 h-3 text-primary shrink-0" />}
+                  </div>
+                  <span className="text-muted-foreground truncate mt-0.5" style={{ ...mono, fontSize: 10 }}>{s.preview}</span>
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); setOpenMenuId(prev => prev === s.id ? null : s.id); }}
+                  className="absolute right-1 top-1.5 p-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-background/60 transition-colors"
+                  aria-label={`Chat options for ${s.title}`}
+                >
+                  <MoreVertical className="w-3.5 h-3.5" />
+                </button>
+                {openMenuId === s.id && (
+                  <div className="absolute right-1 top-8 z-20 w-40 rounded-sm border border-border bg-card shadow-xl py-1">
+                    <button onClick={e => { e.stopPropagation(); togglePinChat(s.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-foreground hover:bg-secondary transition-colors" style={{ ...sans, fontSize: 12 }}>
+                      <Pin className="w-3.5 h-3.5 text-primary" />
+                      {s.pinned ? "Unpin chat" : "Pin chat to top"}
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); renameChat(s.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-foreground hover:bg-secondary transition-colors" style={{ ...sans, fontSize: 12 }}>
+                      <PencilLine className="w-3.5 h-3.5 text-muted-foreground" />
+                      Rename chat
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); deleteChat(s.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[#e5534b] hover:bg-[#e5534b]/10 transition-colors" style={{ ...sans, fontSize: 12 }}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete chat
+                    </button>
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
