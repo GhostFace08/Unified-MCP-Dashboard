@@ -4,6 +4,7 @@ import {
   Settings as SettingsIcon, Activity, LayoutDashboard, Brain, Database,
   SlidersHorizontal, Cpu, Wrench, ChevronDown, ChevronRight, Plug,
   FileText, FolderOpen, Edit3, ExternalLink, Plus, Info, Tag, Trash2,
+  Lock, Unlock,
 } from "lucide-react";
 import { TOOLS, TOOL_MAP, type Tool } from "../config";
 
@@ -258,6 +259,8 @@ const DEFAULT_ISSUE_CATS: IssueCategory[] = [
   { id: "ic-5", name: "Security",          keywords: ["unauthorized", "jwt", "intrusion"] },
 ];
 
+
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export function SettingsView() {
   const [active, setActive] = useState<CategoryId>("monitoring");
@@ -374,23 +377,43 @@ export function SettingsView() {
   }), []);
   const [toolIssueCats, setToolIssueCats] = useState(initialToolCats);
 
-  function overwriteToolCategories(
-    tool: Exclude<Tool, "all">
-  ) {
-    setToolIssueCats(prev => ({
-      ...prev,
-      [tool]: cloneCategories(issueCats),
-    }));
+  // Explicit, user-controlled edit-mode switch per tool. This is the single
+  // source of truth for whether a tool's category list can be edited — it is
+  // NOT derived from comparing content to defaults. Starts locked (false) for
+  // every tool: categories are visible but read-only until the user opts in
+  // via the "Overwrite Default" button.
+  const [toolEditUnlocked, setToolEditUnlocked] = useState<Record<Exclude<Tool, "all">, boolean>>({
+    dynatrace: false,
+    opmanager: false,
+    heal: false,
+    appdynamics: false,
+  });
+
+  // Acts as a toggle:
+  //  - Locked -> click: seed this tool's categories from the current General
+  //    list (an actual "overwrite" of the tool's list with the default/general
+  //    set) and unlock editing. Button turns red.
+  //  - Unlocked -> click: soft-lock. Editing is disabled again, but whatever
+  //    the user customized is kept as-is.
+  function toggleToolCustomization(tool: Exclude<Tool, "all">) {
+    setToolEditUnlocked(prev => {
+      const enteringEditMode = !prev[tool];
+      if (enteringEditMode) {
+        setToolIssueCats(tc => ({ ...tc, [tool]: cloneCategories(issueCats) }));
+      }
+      return { ...prev, [tool]: enteringEditMode };
+    });
     markDirty();
   }
 
-  function restoreToolCategories(
-    tool: Exclude<Tool, "all">
-  ) {
+  // Full reset: content back to DEFAULT_ISSUE_CATS AND re-locked, since a
+  // restored tool has nothing custom left to edit until the user opts back in.
+  function restoreToolCategories(tool: Exclude<Tool, "all">) {
     setToolIssueCats(prev => ({
       ...prev,
       [tool]: cloneCategories(DEFAULT_ISSUE_CATS),
     }));
+    setToolEditUnlocked(prev => ({ ...prev, [tool]: false }));
     markDirty();
   }
 
@@ -906,122 +929,174 @@ export function SettingsView() {
             <div className="grid gap-5 max-w-5xl">
               <SectionTitle hint="Define keyword-based issue categories. A keyword must belong to only one category within its scope.">Issue Categorization</SectionTitle>
 
-              {/* Sub-tabs: General (unchanged flat editor) + one per tool,
-                  same pattern as Monitoring Services' All Services / per-tool split. */}
+              {/* Sub-tabs: General (unchanged flat editor, always editable) + one
+                  per tool. Each tool tab carries a lock/unlock glyph reflecting
+                  toolEditUnlocked — the explicit, button-driven edit-mode
+                  switch (not derived from content). */}
               <div className="flex items-center gap-1 border-b border-border">
                 {([
                   { id: "all" as Tool, label: "General" },
                   ...TOOLS.map(t => ({ id: t.id, label: t.name })),
                 ]).map(t => {
                   const isActive = catTab === t.id;
+                  const isToolTab = t.id !== "all";
+                  const unlocked = isToolTab ? toolEditUnlocked[t.id as Exclude<Tool, "all">] : false;
                   return (
                     <button key={t.id} onClick={() => setCatTab(t.id)}
-                      className={`px-3.5 py-2 -mb-px border-b-2 transition-colors ${isActive ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                      className={`flex items-center gap-1.5 px-3.5 py-2 -mb-px border-b-2 transition-colors ${isActive ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
                       style={{ ...sans, fontSize: 12, fontWeight: isActive ? 600 : 500 }}>
                       {t.label}
+                      {isToolTab && (
+                        unlocked
+                          ? <Unlock className="w-3 h-3 text-[#e5534b]" />
+                          : <Lock className="w-3 h-3 opacity-50" />
+                      )}
                     </button>
                   );
                 })}
               </div>
 
-              {catTab !== "all" && (
-                <div className="flex items-center gap-2 mb-4">
-                  <button
-                    onClick={() =>
-                      overwriteToolCategories(catTab as Exclude<Tool, "all">)
-                    }
-                    className="px-3 py-1.5 rounded-sm border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-                    style={{ ...sans, fontSize: 12 }}
-                  >
-                    Overwrite Default
-                  </button>
-
-                  <button
-                    onClick={() =>
-                      restoreToolCategories(catTab as Exclude<Tool, "all">)
-                    }
-                    className="px-3 py-1.5 rounded-sm border border-border bg-secondary text-foreground hover:border-primary/40 hover:text-primary transition-colors"
-                    style={{ ...sans, fontSize: 12 }}
-                  >
-                    Restore to Default
-                  </button>
-                </div>
-              )}
-
-              <Card title="Create Category" description={catTab === "all" ? "Add a new general category. You can add keywords to it below." : `Add a category specific to ${TOOL_MAP[catTab]?.name}. You can add keywords to it below.`}>
-                <div className="flex items-center gap-2">
-                  <input value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Category name (e.g. Database)"
-                    onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addNewCategory())}
-                    className={inputCls + " max-w-sm"} style={{ ...sans, fontSize: 12 }} />
-                  <button onClick={addNewCategory} className="flex items-center gap-1 px-3 py-1.5 rounded-sm border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors" style={{ ...sans, fontSize: 12 }}>
-                    <Plus className="w-3.5 h-3.5" /> Create
-                  </button>
-                </div>
-              </Card>
-
-              <div className="grid gap-3">
-                {activeCats.length === 0 && (
-                  <p className="text-muted-foreground" style={{ ...sans, fontSize: 12 }}>
-                    No {TOOL_MAP[catTab]?.name ?? ""} specific categories yet — this tool currently falls back to the General categorization above.
-                  </p>
-                )}
-                {activeCats.map(c => {
-                  const inputVal = icKeywordInputs[c.id] ?? "";
-                  const warning = icWarnings[c.id];
-                  const isEditing = editingId === c.id;
-                  return (
-                    <div key={c.id} className="bg-card border border-border rounded-sm">
-                      <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 gap-2">
-                        {isEditing ? (
-                          <input autoFocus value={editingName} onChange={e => setEditingName(e.target.value)}
-                            onBlur={() => commitRename(c.id)} onKeyDown={e => e.key === "Enter" && commitRename(c.id)}
-                            className={inputCls + " max-w-sm"} style={{ ...sans, fontSize: 13, fontWeight: 600 }} />
-                        ) : (
-                          <h3 className="text-foreground" style={{ ...sans, fontSize: 13, fontWeight: 600 }}>{c.name}</h3>
-                        )}
-                        <div className="flex items-center gap-1">
-                          <span className="text-muted-foreground mr-2" style={{ ...mono, fontSize: 10 }}>{c.keywords.length} keywords</span>
-                          <button onClick={() => { setEditingId(c.id); setEditingName(c.name); }}
-                            title="Rename"
-                            className="p-1.5 rounded-sm border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors">
-                            <Edit3 className="w-3 h-3" />
-                          </button>
-                          <button onClick={() => deleteCategory(c.id)}
-                            title="Delete category"
-                            className="p-1.5 rounded-sm border border-[#e5534b]/40 bg-[#e5534b]/10 text-[#e5534b] hover:bg-[#e5534b]/20 transition-colors">
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="p-4 grid gap-3">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {c.keywords.length === 0 && (
-                            <span className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>No keywords yet.</span>
-                          )}
-                          {c.keywords.map(k => (
-                            <Chip key={k} onRemove={() => removeCategoryKeyword(c.id, k)}>{k}</Chip>
-                          ))}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <input value={inputVal}
-                            onChange={e => setIcKeywordInputs(i => ({ ...i, [c.id]: e.target.value }))}
-                            onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addCategoryKeyword(c.id))}
-                            placeholder="Add keyword…"
-                            className={inputCls + " max-w-xs"} style={{ ...mono, fontSize: 12 }} />
-                          <button onClick={() => addCategoryKeyword(c.id)}
-                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-sm border border-border bg-secondary text-foreground hover:border-primary/40 hover:text-primary transition-colors"
-                            style={{ ...sans, fontSize: 11 }}>
-                            <Plus className="w-3.5 h-3.5" /> Add
-                          </button>
-                        </div>
-                        {warning && (
-                          <Banner tone="warn" icon={<AlertCircle className="w-4 h-4" />}>{warning}</Banner>
-                        )}
-                      </div>
+              {catTab !== "all" && (() => {
+                const tool = catTab as Exclude<Tool, "all">;
+                const unlocked = toolEditUnlocked[tool];
+                return (
+                  <div className="flex items-center justify-between gap-4 px-4 py-3 bg-card border border-border rounded-sm">
+                    <div className="flex items-center gap-2.5">
+                      {unlocked ? (
+                        <>
+                          <span className="flex items-center justify-center w-7 h-7 rounded-sm bg-[#e5534b]/15 border border-[#e5534b]/30 text-[#e5534b] shrink-0">
+                            <Unlock className="w-3.5 h-3.5" />
+                          </span>
+                          <div>
+                            <p className="text-foreground" style={{ ...sans, fontSize: 12, fontWeight: 600 }}>Customize Mode Active</p>
+                            <p className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>Categories below are editable. Click "Overwrite Default" again to lock.</p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span className="flex items-center justify-center w-7 h-7 rounded-sm bg-muted/50 border border-border text-muted-foreground shrink-0">
+                            <Lock className="w-3.5 h-3.5" />
+                          </span>
+                          <div>
+                            <p className="text-foreground" style={{ ...sans, fontSize: 12, fontWeight: 600 }}>Locked</p>
+                            <p className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>Click "Overwrite Default" to start customizing {TOOL_MAP[catTab]?.name}'s categories.</p>
+                          </div>
+                        </>
+                      )}
                     </div>
-                  );
-                })}
-              </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => toggleToolCustomization(tool)}
+                        className={`px-3 py-1.5 rounded-sm border transition-colors ${
+                          unlocked
+                            ? "border-[#e5534b]/50 bg-[#e5534b]/15 text-[#e5534b] hover:bg-[#e5534b]/25"
+                            : "border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
+                        }`}
+                        style={{ ...sans, fontSize: 12, fontWeight: unlocked ? 600 : 400 }}
+                      >
+                        Overwrite Default
+                      </button>
+
+                      <button
+                        onClick={() => restoreToolCategories(tool)}
+                        className="px-3 py-1.5 rounded-sm border border-border bg-secondary text-foreground hover:border-primary/40 hover:text-primary transition-colors"
+                        style={{ ...sans, fontSize: 12 }}
+                      >
+                        Restore to Default
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {(() => {
+                const isLocked = catTab !== "all" && !toolEditUnlocked[catTab as Exclude<Tool, "all">];
+                return (
+                  <>
+                    <Card title="Create Category" description={catTab === "all" ? "Add a new general category. You can add keywords to it below." : isLocked ? `Locked — click "Overwrite Default" above to enable editing for ${TOOL_MAP[catTab]?.name}.` : `Add a category specific to ${TOOL_MAP[catTab]?.name}. You can add keywords to it below.`}>
+                      <div className="flex items-center gap-2">
+                        <input value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Category name (e.g. Database)"
+                          onKeyDown={e => e.key === "Enter" && !isLocked && (e.preventDefault(), addNewCategory())}
+                          disabled={isLocked}
+                          className={inputCls + " max-w-sm disabled:opacity-40 disabled:cursor-not-allowed"} style={{ ...sans, fontSize: 12 }} />
+                        <button onClick={addNewCategory} disabled={isLocked}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-sm border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-primary/10"
+                          style={{ ...sans, fontSize: 12 }}>
+                          <Plus className="w-3.5 h-3.5" /> Create
+                        </button>
+                      </div>
+                    </Card>
+
+                    <div className={`grid gap-3 transition-opacity ${isLocked ? "opacity-60" : ""}`}>
+                      {activeCats.length === 0 && (
+                        <p className="text-muted-foreground" style={{ ...sans, fontSize: 12 }}>
+                          No {TOOL_MAP[catTab]?.name ?? ""} specific categories yet — this tool currently falls back to the General categorization above.
+                        </p>
+                      )}
+                      {activeCats.map(c => {
+                        const inputVal = icKeywordInputs[c.id] ?? "";
+                        const warning = icWarnings[c.id];
+                        const isEditing = editingId === c.id;
+                        return (
+                          <div key={c.id} className="bg-card border border-border rounded-sm">
+                            <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 gap-2">
+                              {isEditing ? (
+                                <input autoFocus value={editingName} onChange={e => setEditingName(e.target.value)}
+                                  onBlur={() => commitRename(c.id)} onKeyDown={e => e.key === "Enter" && commitRename(c.id)}
+                                  className={inputCls + " max-w-sm"} style={{ ...sans, fontSize: 13, fontWeight: 600 }} />
+                              ) : (
+                                <h3 className="text-foreground" style={{ ...sans, fontSize: 13, fontWeight: 600 }}>{c.name}</h3>
+                              )}
+                              <div className="flex items-center gap-1">
+                                <span className="text-muted-foreground mr-2" style={{ ...mono, fontSize: 10 }}>{c.keywords.length} keywords</span>
+                                <button onClick={() => !isLocked && (setEditingId(c.id), setEditingName(c.name))}
+                                  disabled={isLocked}
+                                  title="Rename"
+                                  className="p-1.5 rounded-sm border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted-foreground disabled:hover:border-border">
+                                  <Edit3 className="w-3 h-3" />
+                                </button>
+                                <button onClick={() => deleteCategory(c.id)}
+                                  disabled={isLocked}
+                                  title="Delete category"
+                                  className="p-1.5 rounded-sm border border-[#e5534b]/40 bg-[#e5534b]/10 text-[#e5534b] hover:bg-[#e5534b]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#e5534b]/10">
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="p-4 grid gap-3">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {c.keywords.length === 0 && (
+                                  <span className="text-muted-foreground" style={{ ...sans, fontSize: 11 }}>No keywords yet.</span>
+                                )}
+                                {c.keywords.map(k => (
+                                  <Chip key={k} onRemove={isLocked ? undefined : () => removeCategoryKeyword(c.id, k)}>{k}</Chip>
+                                ))}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <input value={inputVal}
+                                  onChange={e => setIcKeywordInputs(i => ({ ...i, [c.id]: e.target.value }))}
+                                  onKeyDown={e => e.key === "Enter" && !isLocked && (e.preventDefault(), addCategoryKeyword(c.id))}
+                                  placeholder="Add keyword…"
+                                  disabled={isLocked}
+                                  className={inputCls + " max-w-xs disabled:opacity-40 disabled:cursor-not-allowed"} style={{ ...mono, fontSize: 12 }} />
+                                <button onClick={() => addCategoryKeyword(c.id)}
+                                  disabled={isLocked}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-sm border border-border bg-secondary text-foreground hover:border-primary/40 hover:text-primary transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:text-foreground"
+                                  style={{ ...sans, fontSize: 11 }}>
+                                  <Plus className="w-3.5 h-3.5" /> Add
+                                </button>
+                              </div>
+                              {warning && (
+                                <Banner tone="warn" icon={<AlertCircle className="w-4 h-4" />}>{warning}</Banner>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>

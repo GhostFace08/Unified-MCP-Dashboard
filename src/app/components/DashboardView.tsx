@@ -30,6 +30,13 @@ function tsOf(t: string): number {
   return (h || 0) * 60 + (m || 0);
 }
 
+// Formats a Date as a value suitable for an <input type="datetime-local">
+// (local time, no timezone suffix, minute precision).
+function toDatetimeLocalValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // ─── Real-world timestamp parsers ──────────────────────────────────────────
 // Dynatrace sends ISO timestamps with 9 fractional-second digits
 // (e.g. "2026-05-08T06:00:47.972000000Z"), which `new Date()` cannot parse
@@ -77,9 +84,12 @@ const KPI_DATA: { category: Category; total: number; critical: number; errors: n
   { category: "Security",         total: 2,  critical: 1, errors: 1 },
 ];
 
-// Time presets: 30-day removed, max 7 days enforced
+// Time presets: 30-day removed, max 7 days enforced. The dashboard's default
+// / fallback window ("the lock") is 15 minutes — every path that used to
+// silently fall back to 7 days now falls back to this instead.
 const TIME_RANGE_OPTIONS = ["5 min","10 min","15 min","30 min","1 hr","6 hr","24 hr","7 days","Custom"];
-const MAX_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_RANGE_MS = 7 * 24 * 60 * 60 * 1000; // 168 hours
+const DEFAULT_RANGE_MS = 15 * 60 * 1000;      // the 15-min lock
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -181,7 +191,7 @@ function IssueDetailsModal({ row, onClose }: { row: IssueRow | null; onClose: ()
 
 export function DashboardView() {
   const [activeTool, setActiveTool] = useState<Tool>("all");
-  const [timeRange, setTimeRange]   = useState("7 days");
+  const [timeRange, setTimeRange]   = useState("15 min");
   const [startTime, setStartTime]   = useState("");
   const [endTime, setEndTime]       = useState("");
   const [uiRefreshTime, setUiRefreshTime] = useState("1");
@@ -469,18 +479,6 @@ export function DashboardView() {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  // Time range validation
-  const isCustom = timeRange === "Custom";
-  const customRangeError = useMemo(() => {
-    if (!isCustom || !startTime || !endTime) return null;
-    const s = new Date(startTime).getTime();
-    const e = new Date(endTime).getTime();
-    if (isNaN(s) || isNaN(e)) return null;
-    if (e <= s) return "End time must be after start time.";
-    if (e - s > MAX_RANGE_MS) return "Maximum selectable range is 7 days.";
-    return null;
-  }, [isCustom, startTime, endTime]);
-
   // ── Time range → cutoff window (ms) ─────────────────────────────────────
   const RANGE_MS: Record<string, number> = {
     "5 min": 5 * 60 * 1000,
@@ -493,25 +491,59 @@ export function DashboardView() {
     "7 days": 7 * 24 * 60 * 60 * 1000,
   };
 
+  // Time range validation. Custom ranges must sit entirely within the last
+  // 168 hours (7 days): start cannot be earlier than "now - 168h", end
+  // cannot be later than "now". Any sub-range inside that window is valid.
+  const isCustom = timeRange === "Custom";
+  const customRangeError = useMemo(() => {
+    if (!isCustom || !startTime || !endTime) return null;
+    const s = new Date(startTime).getTime();
+    const e = new Date(endTime).getTime();
+    if (isNaN(s) || isNaN(e)) return null;
+    if (e <= s) return "End time must be after start time.";
+    const nowMs = Date.now();
+    const earliestAllowed = nowMs - MAX_RANGE_MS;
+    const CLOCK_SKEW_BUFFER_MS = 60 * 1000; // tolerate a minute of drift while typing
+    if (s < earliestAllowed) return "Start time cannot be more than 168 hours (7 days) before now.";
+    if (e > nowMs + CLOCK_SKEW_BUFFER_MS) return "End time cannot be in the future.";
+    if (e - s > MAX_RANGE_MS) return "Maximum selectable range is 168 hours (7 days).";
+    return null;
+  }, [isCustom, startTime, endTime]);
+
+  // Bounds shown on the datetime-local pickers themselves so the browser UI
+  // won't even offer dates outside "now - 168h" .. "now".
+  const customRangeBounds = useMemo(() => {
+    const nowMs = Date.now();
+    return {
+      min: toDatetimeLocalValue(new Date(nowMs - MAX_RANGE_MS)),
+      max: toDatetimeLocalValue(new Date(nowMs)),
+    };
+  }, [isCustom]);
+
+  // Single source of truth for the active time window, used by both the
+  // issues table and the graph. Falls back to the 15-minute lock — not 7
+  // days — whenever there isn't a valid explicit range yet (e.g. right
+  // after switching to "Custom" before start/end have been chosen, or an
+  // unrecognized timeRange value).
+  const activeWindow = useMemo(() => {
+    const nowMs = Date.now();
+    if (isCustom) {
+      if (startTime && endTime && !customRangeError) {
+        return { startMs: new Date(startTime).getTime(), endMs: new Date(endTime).getTime() };
+      }
+      return { startMs: nowMs - DEFAULT_RANGE_MS, endMs: nowMs };
+    }
+    const windowMs = RANGE_MS[timeRange] ?? DEFAULT_RANGE_MS;
+    return { startMs: nowMs - windowMs, endMs: nowMs };
+  }, [isCustom, startTime, endTime, customRangeError, timeRange]);
+
   // ── Global filter pipeline ───────────────────────────────────────────────
-  // 1. tool filter   2. time range   3. keyword search (global)
+  // 1. tool filter   2. time range (activeWindow)   3. keyword search (global)
   // 4. status (Total/Active/Resolved)   5. categories (union)
   const filteredIssues = useMemo(() => {
     let rows = activeTool === "all" ? allIssues : allIssues.filter(r => r.source === activeTool);
 
-    if (isCustom) {
-      if (startTime && endTime && !customRangeError) {
-        const s = new Date(startTime).getTime();
-        const e = new Date(endTime).getTime();
-        rows = rows.filter(r => r.ts >= s && r.ts <= e);
-      }
-    } else {
-      const windowMs = RANGE_MS[timeRange];
-      if (windowMs) {
-        const cutoff = Date.now() - windowMs;
-        rows = rows.filter(r => r.ts >= cutoff);
-      }
-    }
+    rows = rows.filter(r => r.ts >= activeWindow.startMs && r.ts <= activeWindow.endMs);
 
     if (keyword) {
       const kw = keyword.toLowerCase();
@@ -531,7 +563,7 @@ export function DashboardView() {
       rows = rows.filter(r => categoryFilters.includes(r.category));
     }
     return rows;
-  }, [activeTool, keyword, statusFilter, categoryFilters, timeRange, startTime, endTime, isCustom, customRangeError, allIssues]);
+  }, [activeTool, keyword, statusFilter, categoryFilters, activeWindow, allIssues]);
 
   // Per-section counts always reflect global filter
   const total    = filteredIssues.length;
@@ -570,20 +602,12 @@ export function DashboardView() {
     });
   }, [filteredIssues]);
 
-  // Build graph data from filteredIssues: daily buckets between the selected
-  // range (or last 7 days). Returns an array of objects with counts per tool
-  // and total. Memoized for performance.
+  // Build graph data from filteredIssues: buckets spanning the active window
+  // (activeWindow — same 15-min-locked / bounded-custom window as the table).
+  // Returns an array of objects with counts per tool and total. Memoized for
+  // performance.
   const graphData = useMemo(() => {
-    // determine range
-    let startMs: number;
-    let endMs: number = Date.now();
-    if (isCustom && startTime && endTime && !customRangeError) {
-      startMs = new Date(startTime).getTime();
-      endMs = new Date(endTime).getTime();
-    } else {
-      const windowMs = RANGE_MS[timeRange] ?? RANGE_MS['7 days'];
-      startMs = Date.now() - (windowMs ?? RANGE_MS['7 days']);
-    }
+    const { startMs, endMs } = activeWindow;
 
     const spanMs = Math.max(0, endMs - startMs);
     const useHourlyBuckets = spanMs <= 24 * 60 * 60 * 1000;
@@ -617,7 +641,7 @@ export function DashboardView() {
       return obj;
     });
     return rows;
-  }, [filteredIssues, timeRange, isCustom, startTime, endTime, customRangeError]);
+  }, [filteredIssues, activeWindow]);
 
   // Matrix cell counts: per (category, col) → {current, total}
   function cellCounts(cat: Category, app: string, source: Tool) {
@@ -825,12 +849,16 @@ export function DashboardView() {
           <Calendar className="w-4 h-4 text-muted-foreground" />
           <input type="datetime-local" value={startTime} onChange={e => setStartTime(e.target.value)}
             disabled={!isCustom}
+            min={customRangeBounds.min}
+            max={customRangeBounds.max}
             className={`bg-secondary border border-border rounded-sm px-2 py-1 text-foreground outline-none transition-opacity ${!isCustom ? "opacity-40 cursor-not-allowed" : ""}`}
             style={{ ...mono, fontSize: 10 }} />
           <span className="text-muted-foreground" style={{ ...mono, fontSize: 10 }}>TO</span>
           <Calendar className="w-4 h-4 text-muted-foreground" />
           <input type="datetime-local" value={endTime} onChange={e => setEndTime(e.target.value)}
             disabled={!isCustom}
+            min={customRangeBounds.min}
+            max={customRangeBounds.max}
             className={`bg-secondary border border-border rounded-sm px-2 py-1 text-foreground outline-none transition-opacity ${!isCustom ? "opacity-40 cursor-not-allowed" : ""}`}
             style={{ ...mono, fontSize: 10 }} />
           <select value={timeRange} onChange={e => setTimeRange(e.target.value)}
@@ -841,6 +869,11 @@ export function DashboardView() {
         </div>
       </div>
 
+      {isCustom && (
+        <div className="px-5 py-1.5 border-b border-border/40 bg-secondary/20 text-muted-foreground" style={{ ...mono, fontSize: 10 }}>
+          Custom range must fall within the last 168 hours (7 days) — from {customRangeBounds.min.replace("T"," ")} to {customRangeBounds.max.replace("T"," ")}.
+        </div>
+      )}
       {customRangeError && (
         <div className="px-5 py-1.5 border-b border-[#e5534b]/30 bg-[#e5534b]/10 text-[#e5534b]" style={{ ...sans, fontSize: 11 }}>
           {customRangeError}
